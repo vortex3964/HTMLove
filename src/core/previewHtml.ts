@@ -29,6 +29,16 @@ export const PREVIEW_RUNTIME_SCRIPT = `(function(){
   if(document.readyState==='complete'){send('ready')}else{window.addEventListener('load',function(){send('ready')})}
 })();`;
 
+export function previewBaseCss(canvas: "light" | "dark"): string {
+  const bg = canvas === "dark" ? "#18181b" : "#ffffff";
+  const fg = canvas === "dark" ? "#e4e4e7" : "#18181b";
+  return [
+    "html,body{margin:0;padding:0}",
+    `body{min-height:100vh;display:flex;padding:18px;box-sizing:border-box;background:${bg};color:${fg};font-family:system-ui,-apple-system,'Segoe UI',sans-serif}`,
+    ".hv-stage{width:100%;margin:auto;display:flex;flex-direction:column;align-items:center}",
+  ].join("\n");
+}
+
 export function buildPreviewDoc(options: PreviewDocOptions): string {
   const {
     html,
@@ -39,14 +49,7 @@ export function buildPreviewDoc(options: PreviewDocOptions): string {
     extraCss = "",
   } = options;
 
-  const bg = canvas === "dark" ? "#18181b" : "#ffffff";
-  const fg = canvas === "dark" ? "#e4e4e7" : "#18181b";
-
-  const baseCss = [
-    "html,body{margin:0;padding:0}",
-    `body{min-height:100vh;display:flex;padding:18px;box-sizing:border-box;background:${bg};color:${fg};font-family:system-ui,-apple-system,'Segoe UI',sans-serif}`,
-    ".hv-stage{width:100%;margin:auto;display:flex;flex-direction:column;align-items:center}",
-  ].join("\n");
+  const baseCss = previewBaseCss(canvas);
 
   const pauseCss = paused
     ? "*{animation-play-state:paused !important}"

@@ -140,10 +140,6 @@ function GalleryTile({ component }: { component: Component }) {
 
   if (!session) return null;
 
-  const needsLive = component.kind !== "tsx";
-  /* parse before mount, keep React sources visible either way */
-  const showLive = needsLive ? inView : true;
-
   return (
     <article className="tile card" ref={ref}>
       <header
@@ -171,7 +167,7 @@ function GalleryTile({ component }: { component: Component }) {
       </header>
 
       <div className="tile-preview">
-        {showLive ? (
+        {inView ? (
           <PreviewFrame
             component={component}
             session={session}
@@ -198,7 +194,6 @@ function GalleryTile({ component }: { component: Component }) {
             <TriangleAlert size={10} /> css only
           </span>
         )}
-        {component.kind === "tsx" && <span className="badge">not compiled yet</span>}
         <span className="spacer" />
         {component.dir && <span className="faint mono tile-dir">{component.dir}/</span>}
       </footer>

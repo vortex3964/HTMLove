@@ -1,15 +1,19 @@
 /**
  * PreviewFrame — a sandboxed iframe that renders one component.
  *
- * Shared by the gallery tiles and the detail playground. Runtime errors
- * raised inside the preview come back over postMessage and show up as a
- * small overlay instead of a silent blank box.
+ * HTML/txt components render straight from their source; React
+ * components are bundled first (esbuild), then run inside the same kind
+ * of sandbox with an import map for their npm dependencies. Runtime
+ * errors come back over postMessage and show up as an overlay instead
+ * of a silent blank box.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { TriangleAlert } from "lucide-react";
 import { buildPreviewDoc, PREVIEW_READY_CHANNEL } from "../core/previewHtml";
+import { buildTsxPreviewDoc } from "../core/tsxPreviewHtml";
 import { splitTxtSource } from "../core/catalog";
 import { effectiveFile } from "../core/edits";
+import { compileTsxComponentCached, getBrowserEsbuild, type CompileResult } from "../core/compile";
 import { useStore } from "../state/store";
 import type { Component, Session } from "../core/types";
 
@@ -26,26 +30,27 @@ interface PreviewFrameProps {
   /** Force a fresh reload when this changes. */
   reloadKey?: number;
   className?: string;
-  /** Fixed pixel width (viewport presets); defaults to full width. */
-  width?: number;
   /** Extra CSS injected after the component's own (design tokens). */
   extraCss?: string;
   /** Report errors upward as well (detail view shows them elsewhere). */
   onErrors?(errors: PreviewError[]): void;
 }
 
-/** The html/css pair a component renders from, honouring live drafts. */
+/** The sources a component renders from, honouring live drafts. */
 export function resolvePreviewSource(
   component: Component,
   session: Session,
-): { html: string; css: string } {
+): { html: string; css: string; tsx: string | null } {
   if (component.kind === "txt" && component.txtPath) {
     const raw = effectiveFile(session, component.txtPath);
-    return splitTxtSource(raw);
+    const { html, css } = splitTxtSource(raw);
+    return { html, css, tsx: null };
   }
-  const html = effectiveFile(session, component.htmlPath);
-  const css = effectiveFile(session, component.cssPath);
-  return { html, css };
+  return {
+    html: effectiveFile(session, component.htmlPath),
+    css: effectiveFile(session, component.cssPath),
+    tsx: component.tsxPath ? effectiveFile(session, component.tsxPath) : null,
+  };
 }
 
 export function PreviewFrame({
@@ -55,7 +60,6 @@ export function PreviewFrame({
   paused,
   reloadKey = 0,
   className,
-  width,
   extraCss,
   onErrors,
 }: PreviewFrameProps) {
@@ -63,11 +67,55 @@ export function PreviewFrame({
   const [errors, setErrors] = useState<PreviewError[]>([]);
   const { backend } = useStore();
 
-  const source = useMemo(
-    () => resolvePreviewSource(component, session),
-    [component, session],
-  );
+  const source = useMemo(() => resolvePreviewSource(component, session), [component, session]);
 
+  /* ---------------- react pipeline ---------------- */
+  const isReact = component.kind === "tsx" && component.tsxPath !== undefined;
+  const [compiled, setCompiled] = useState<CompileResult | null>(null);
+  const [compiling, setCompiling] = useState(false);
+
+  useEffect(() => {
+    if (!isReact || source.tsx === null || !component.tsxPath) return;
+    let cancelled = false;
+    setCompiling(true);
+    compileTsxComponentCached({
+      source: source.tsx,
+      path: component.tsxPath,
+      files: session.files,
+      assets: new Set(session.assets.keys()),
+      getEsbuild: getBrowserEsbuild,
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setCompiled(result);
+        setCompiling(false);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setCompiled({
+          ok: false,
+          errors: [err instanceof Error ? err.message : String(err)],
+        });
+        setCompiling(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isReact, source.tsx, component.tsxPath, session.files, session.assets]);
+
+  const tsxDoc = useMemo(() => {
+    if (!compiled || !compiled.ok) return null;
+    return buildTsxPreviewDoc({
+      code: compiled.code,
+      css: compiled.css,
+      externals: compiled.externals,
+      canvas,
+      paused,
+      usesTailwind: component.usesTailwind,
+    });
+  }, [compiled, canvas, paused, component.usesTailwind]);
+
+  /* ---------------- html pipeline ---------------- */
   const doc = useMemo(
     () =>
       buildPreviewDoc({
@@ -84,7 +132,7 @@ export function PreviewFrame({
   /* fresh document: drop stale errors */
   useEffect(() => {
     setErrors([]);
-  }, [doc, reloadKey]);
+  }, [doc, tsxDoc, reloadKey]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -108,30 +156,68 @@ export function PreviewFrame({
     return () => window.removeEventListener("message", onMessage);
   }, [onErrors]);
 
-  const isReact = component.kind === "tsx";
-  const hasNothingToRender = component.cssOnly || (!isReact && source.html.trim() === "");
+  /* ---------------- react states ---------------- */
 
   if (isReact) {
-    return (
-      <div className={className} data-preview-kind="tsx-pending">
-        <div className="preview-note">
-          <span className="badge accent">react</span>
-          <p>
-            Live compilation for React sources lands in the compile milestone.
-            {component.screenshots.length > 0 ? " A reference screenshot is below." : ""}
-          </p>
-          {component.screenshots.length > 0 && (
-            <img
-              className="preview-shot"
-              src={backend.assetUrl(session.root, component.screenshots[0])}
-              alt={`${component.name} reference`}
-              loading="lazy"
-            />
-          )}
+    if (!compiled && compiling) {
+      return (
+        <div className={className} data-preview-kind="tsx">
+          <div className="preview-note">
+            <span className="spinner-ring" />
+            <p>Compiling React component…</p>
+          </div>
         </div>
+      );
+    }
+    if (!compiled || !compiled.ok) {
+      return (
+        <div className={className} data-preview-kind="tsx">
+          <div className="preview-note preview-note-bad">
+            <span className="badge bad">
+              <TriangleAlert size={11} /> compile failed
+            </span>
+            <div className="preview-compile-errors mono">
+              {(compiled && !compiled.ok ? compiled.errors : ["unknown error"]).map((err, i) => (
+                <div key={i}>{err}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className={className} data-preview-kind="tsx">
+        <iframe
+          key={reloadKey}
+          ref={iframeRef}
+          title={`${component.name} preview`}
+          sandbox="allow-scripts"
+          loading="lazy"
+          srcDoc={tsxDoc ?? ""}
+        />
+        {compiled.stubs.length > 0 && (
+          <div className="preview-stubs" title={compiled.stubs.join("\n")}>
+            {compiled.stubs.length} stubbed import{compiled.stubs.length === 1 ? "" : "s"}
+          </div>
+        )}
+        {errors.length > 0 && (
+          <div className="preview-errors" role="status">
+            {errors.map((err, i) => (
+              <div key={i} className="preview-error">
+                <TriangleAlert size={12} />
+                <span>{err.message}</span>
+                {err.detail && <span className="faint mono">{err.detail}</span>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
+
+  /* ---------------- html states ---------------- */
+
+  const hasNothingToRender = component.cssOnly || source.html.trim() === "";
 
   if (hasNothingToRender) {
     return (
@@ -142,10 +228,21 @@ export function PreviewFrame({
               <span className="badge warn">
                 <TriangleAlert size={11} /> css only
               </span>
-              <p>This snippet has CSS but no markup yet — the editor lands next milestone.</p>
+              <p>
+                This snippet has CSS but no markup — add some HTML in the editor (or the
+                text file) to see it.
+              </p>
             </>
           ) : (
             <p className="faint">No markup found.</p>
+          )}
+          {component.screenshots.length > 0 && (
+            <img
+              className="preview-shot"
+              src={backend.assetUrl(session.root, component.screenshots[0])}
+              alt={`${component.name} reference`}
+              loading="lazy"
+            />
           )}
         </div>
       </div>
@@ -161,7 +258,6 @@ export function PreviewFrame({
         sandbox="allow-scripts"
         loading="lazy"
         srcDoc={doc}
-        style={width !== undefined ? { width, maxWidth: "100%" } : undefined}
       />
       {errors.length > 0 && (
         <div className="preview-errors" role="status">
