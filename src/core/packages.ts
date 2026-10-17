@@ -15,6 +15,33 @@ export const PINNED_VERSIONS: Record<string, string> = {
   "@internationalized/date": "3.6.0",
   "react-aria": "3.36.0",
   "react-aria-components": "1.5.0",
+  codemirror: "6",
+  "@codemirror/state": "6",
+  "@codemirror/view": "6",
+  "@codemirror/language": "6",
+  "@codemirror/lang-html": "6",
+  "@codemirror/lang-css": "6",
+  "@codemirror/lang-javascript": "6",
+};
+
+/**
+ * Packages that pass instances across module boundaries and therefore
+ * must share one copy per preview. CodeMirror is the classic case: two
+ * `@codemirror/state` copies make every extension check fail. Listing a
+ * specifier here makes esm.sh leave those dependencies external and the
+ * import map wires everyone to the same URL.
+ */
+export const SHARED_PEERS: Record<string, string[]> = {
+  codemirror: ["@codemirror/state", "@codemirror/view", "@codemirror/language"],
+  "@codemirror/view": ["@codemirror/state"],
+  "@codemirror/language": ["@codemirror/state", "@codemirror/view"],
+  "@codemirror/lang-html": ["@codemirror/state", "@codemirror/view", "@codemirror/language"],
+  "@codemirror/lang-css": ["@codemirror/state", "@codemirror/view", "@codemirror/language"],
+  "@codemirror/lang-javascript": [
+    "@codemirror/state",
+    "@codemirror/view",
+    "@codemirror/language",
+  ],
 };
 
 const REACT_SUBPATHS: Record<string, string> = {
@@ -40,7 +67,9 @@ export function esmUrl(specifier: string, versionOverrides?: Record<string, stri
 
   const pinned = versionOverrides?.[specifier] ?? PINNED_VERSIONS[specifier];
   const versioned = pinned ? `${specifier}@${pinned}` : specifier;
-  return `https://esm.sh/${versioned}?deps=react@${PREVIEW_REACT_VERSION}`;
+  const shared = SHARED_PEERS[specifier];
+  const externalParam = shared && shared.length > 0 ? `&external=${shared.join(",")}` : "";
+  return `https://esm.sh/${versioned}?deps=react@${PREVIEW_REACT_VERSION}${externalParam}`;
 }
 
 export interface ImportMap {
@@ -54,8 +83,14 @@ export function buildImportMap(
   urlOverrides?: Record<string, string>,
 ): ImportMap {
   const imports: Record<string, string> = {};
-  for (const specifier of externals) {
+  /* Shared peers ride along transitively so a package that only asks
+     for `codemirror` still gets one @codemirror/state for everyone. */
+  const queue = [...externals];
+  while (queue.length > 0) {
+    const specifier = queue.shift() as string;
+    if (specifier in imports) continue;
     imports[specifier] = urlOverrides?.[specifier] ?? esmUrl(specifier, versionOverrides);
+    for (const peer of SHARED_PEERS[specifier] ?? []) queue.push(peer);
   }
   return { imports };
 }

@@ -100,4 +100,20 @@ describe("buildImportMap", () => {
       "https://magicui.design/r/file-tree.js",
     );
   });
+
+  it("gives the CodeMirror family one shared core module", () => {
+    const map = buildImportMap(["codemirror"]);
+    expect(Object.keys(map.imports)).toEqual([
+      "codemirror",
+      "@codemirror/state",
+      "@codemirror/view",
+      "@codemirror/language",
+    ]);
+    expect(map.imports["codemirror"]).toContain(
+      "external=@codemirror/state,@codemirror/view,@codemirror/language",
+    );
+    /* the shared core itself is not externalised from itself */
+    expect(map.imports["@codemirror/state"]).toContain("@codemirror/state@6");
+    expect(map.imports["@codemirror/state"]).not.toContain("external=");
+  });
 });
