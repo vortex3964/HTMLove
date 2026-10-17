@@ -125,6 +125,22 @@ async function loadFixtureFolder() {
   await click(button("Use this folder"));
 }
 
+/** Pointer drag: down on `target`, move and up on the window. */
+async function dragBy(target: HTMLElement, from: [number, number], to: [number, number]) {
+  await act(async () => {
+    target.dispatchEvent(
+      new MouseEvent("pointerdown", { bubbles: true, clientX: from[0], clientY: from[1] }),
+    );
+    window.dispatchEvent(
+      new MouseEvent("pointermove", { bubbles: true, clientX: to[0], clientY: to[1] }),
+    );
+    window.dispatchEvent(
+      new MouseEvent("pointerup", { bubbles: true, clientX: to[0], clientY: to[1] }),
+    );
+  });
+  await settle();
+}
+
 beforeEach(async () => {
   localStorage.clear();
   scanned = [];
@@ -193,6 +209,51 @@ describe("the htmlove app", () => {
     expect(container.querySelector(".sidebar")).toBeTruthy();
     /* the panel stayed put while the drawer was open */
     expect(container.querySelectorAll(".panel")).toHaveLength(1);
+  });
+
+  it("moves and resizes a panel like a little window", async () => {
+    await loadFixtureFolder();
+    await click(row("Alpha"));
+
+    const panel = container.querySelector<HTMLElement>(".board-panel")!;
+    /* new panels start at the default size */
+    expect(panel.style.width).toBe("380px");
+    expect(panel.style.height).toBe("350px");
+
+    /* drag the header: the panel follows, and the position sticks */
+    await dragBy(panel.querySelector<HTMLElement>(".panel-top")!, [100, 100], [160, 130]);
+    expect(panel.style.left).toBe("60px");
+    expect(panel.style.top).toBe("30px");
+
+    /* drag the corner: it resizes, and never below the minimum */
+    const handle = panel.querySelector<HTMLElement>(".panel-resize")!;
+    await dragBy(handle, [200, 200], [260, 240]);
+    expect(panel.style.width).toBe("440px");
+    expect(panel.style.height).toBe("390px");
+
+    await dragBy(handle, [200, 200], [0, 0]);
+    expect(panel.style.width).toBe("240px");
+    expect(panel.style.height).toBe("200px");
+
+    /* the layout is kept per folder */
+    const stored = JSON.parse(localStorage.getItem("htmlove:layout:/fake/home/components")!);
+    expect(Object.values(stored)[0]).toEqual({ x: 60, y: 30, w: 240, h: 200 });
+  });
+
+  it("adds every component at the default size without stacking them", async () => {
+    await loadFixtureFolder();
+    await click(button("Add all 2 components"));
+
+    const panels = [...container.querySelectorAll<HTMLElement>(".board-panel")];
+    expect(panels).toHaveLength(2);
+    for (const panel of panels) {
+      expect(panel.style.width).toBe("380px");
+      expect(panel.style.height).toBe("350px");
+    }
+    /* the first free slot is next to the first panel, not on top of it */
+    expect(panels[0]!.style.left).toBe("0px");
+    expect(panels[1]!.style.left).toBe("396px");
+    expect(panels[1]!.style.top).toBe("0px");
   });
 
   it("opens the dependency doctor and comes back to the board", async () => {

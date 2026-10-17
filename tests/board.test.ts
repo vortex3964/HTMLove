@@ -1,15 +1,21 @@
 /**
- * board — the pure helpers behind the dashboard: mounting, ordering and
- * the props JSON people type into a panel.
+ * board — the pure helpers behind the dashboard: mounting, panel
+ * placement and the props JSON people type into a panel.
  */
 import { describe, expect, it } from "vitest";
 import {
   addToBoard,
+  clampBox,
+  DEFAULT_PANEL_SIZE,
+  fillLayout,
   formatPropsJson,
-  insertionIndex,
-  moveOnBoard,
+  freeSpot,
+  MIN_PANEL_SIZE,
   normalizeBoard,
+  normalizeLayout,
   normalizeProps,
+  overlaps,
+  PANEL_GAP,
   parsePropsJson,
   removeFromBoard,
 } from "../src/core/board";
@@ -32,27 +38,77 @@ describe("normalizeProps", () => {
   });
 });
 
-describe("mounting and ordering", () => {
+describe("mounting", () => {
   it("adds once and removes cleanly", () => {
     expect(addToBoard(["a"], "b")).toEqual(["a", "b"]);
     expect(addToBoard(["a"], "a")).toEqual(["a"]);
     expect(removeFromBoard(["a", "b", "a"], "a")).toEqual(["b"]);
   });
+});
 
-  it("moves a component before an index of the original list", () => {
-    const ids = ["a", "b", "c", "d"];
-    expect(moveOnBoard(ids, "d", 0)).toEqual(["d", "a", "b", "c"]);
-    expect(moveOnBoard(ids, "a", 3)).toEqual(["b", "c", "a", "d"]);
-    expect(moveOnBoard(ids, "b", 1)).toEqual(ids);
-    expect(moveOnBoard(ids, "b", 4)).toEqual(["a", "c", "d", "b"]);
-    expect(moveOnBoard(ids, "gone", 2)).toEqual(ids);
+describe("panel layout", () => {
+  it("normalizes stored boxes: known ids only, rounded and clamped", () => {
+    const stored = {
+      a: { x: -10.4, y: 5.6, w: 100, h: 80 },
+      b: { x: 10, y: 20, w: 400, h: 350 },
+      gone: { x: 0, y: 0, w: 300, h: 300 },
+      c: { x: 1, y: 2, w: "wide", h: 300 },
+      d: null,
+    };
+    expect(normalizeLayout(stored, VALID)).toEqual({
+      a: { x: 0, y: 6, w: MIN_PANEL_SIZE.w, h: MIN_PANEL_SIZE.h },
+      b: { x: 10, y: 20, w: 400, h: 350 },
+    });
+    expect(normalizeLayout("nope", VALID)).toEqual({});
+    expect(normalizeLayout([{ x: 0 }], VALID)).toEqual({});
   });
 
-  it("computes the drop index from the target panel and side", () => {
-    const ids = ["a", "b", "c"];
-    expect(insertionIndex(ids, "b", "before")).toBe(1);
-    expect(insertionIndex(ids, "b", "after")).toBe(2);
-    expect(insertionIndex(ids, "gone", "before")).toBe(3);
+  it("clamps a box to the canvas and to the minimum sizes", () => {
+    expect(clampBox({ x: 700, y: -20, w: 380, h: 350 }, 800)).toEqual({
+      x: 420,
+      y: 0,
+      w: 380,
+      h: 350,
+    });
+    expect(clampBox({ x: -5, y: 4, w: 10, h: 10 }, 800)).toEqual({
+      x: 0,
+      y: 4,
+      w: MIN_PANEL_SIZE.w,
+      h: MIN_PANEL_SIZE.h,
+    });
+    /* width not measured yet: only the minimums apply */
+    expect(clampBox({ x: 700, y: 10, w: 380, h: 350 }, 0)).toEqual({
+      x: 700,
+      y: 10,
+      w: 380,
+      h: 350,
+    });
+  });
+
+  it("places a new panel in the first free slot of a row-major grid", () => {
+    const size = { w: 380, h: 350 };
+    expect(freeSpot([], 800, size)).toEqual({ x: 0, y: 0 });
+    const first = { x: 0, y: 0, ...size };
+    expect(freeSpot([first], 800, size)).toEqual({ x: size.w + PANEL_GAP, y: 0 });
+    const second = { x: size.w + PANEL_GAP, y: 0, ...size };
+    expect(freeSpot([first, second], 800, size)).toEqual({ x: 0, y: size.h + PANEL_GAP });
+  });
+
+  it("skips the rows a tall panel already blocks", () => {
+    const blocked = [{ x: 0, y: 0, w: 800, h: 400 }];
+    const spot = freeSpot(blocked, 800);
+    expect(spot).toEqual({ x: 0, y: 2 * (DEFAULT_PANEL_SIZE.h + PANEL_GAP) });
+    expect(overlaps({ ...spot, ...DEFAULT_PANEL_SIZE }, blocked[0])).toBe(false);
+  });
+
+  it("fills a layout so every mounted id has a box", () => {
+    const stored = { a: { x: 10, y: 10, w: 300, h: 250 } };
+    const filled = fillLayout(["a", "b", "c"], stored, 800);
+    expect(filled.a).toEqual(stored.a);
+    expect(overlaps(filled.a, filled.b)).toBe(false);
+    expect(overlaps(filled.b, filled.c)).toBe(false);
+    expect(filled.b.w).toBe(DEFAULT_PANEL_SIZE.w);
+    expect(filled.b.h).toBe(DEFAULT_PANEL_SIZE.h);
   });
 });
 

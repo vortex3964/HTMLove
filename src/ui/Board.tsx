@@ -1,22 +1,24 @@
 /**
- * Board — the dashboard itself: the mounted components as a grid you can
- * reorder, resize (2/3/4 columns), fill and empty. Drops from the
- * sidebar add a component; drops on a panel reorder it.
+ * Board — the dashboard itself: a free canvas where every mounted
+ * component is a little window. Drag a panel by its header to move it,
+ * drag its corner to resize it; both stick per folder. Clicking or
+ * dragging components in from the sidebar adds them at the default size
+ * — in the first free slot, or right where they were dropped.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { LayoutGrid, Trash2 } from "lucide-react";
 import { useStore } from "../state/store";
 import { BoardPanel } from "./BoardPanel";
-import { dragSession, insertionIndex } from "../core/board";
+import { dragSession } from "../core/board";
 import type { Component } from "../core/types";
 
+const CANVAS_MIN_HEIGHT = 360;
+
 export function Board() {
-  const { session, board, addToBoard, addAllToBoard, moveOnBoard, clearBoard, prefs, setPrefs } =
+  const { session, board, layout, addToBoard, addAllToBoard, clearBoard, setBoardWidth } =
     useStore();
+  const canvasRef = useRef<HTMLDivElement>(null);
   const [dropHint, setDropHint] = useState(false);
-  const [dropTarget, setDropTarget] = useState<{ id: string; side: "before" | "after" } | null>(
-    null,
-  );
 
   const components = session?.catalog ?? [];
   const byId = useMemo(() => new Map(components.map((c) => [c.id, c])), [components]);
@@ -25,7 +27,27 @@ export function Board() {
     [board, byId],
   );
 
+  /* keep the store's idea of the canvas width current so panels added
+     by click or "Add all" are placed on a grid that fits */
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    setBoardWidth(el.clientWidth);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setBoardWidth(el.clientWidth));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [setBoardWidth, session?.root]);
+
   if (!session) return null;
+
+  const canvasHeight = Math.max(
+    CANVAS_MIN_HEIGHT,
+    mounted.reduce((bottom, component) => {
+      const box = layout[component.id];
+      return box ? Math.max(bottom, box.y + box.h + 80) : bottom;
+    }, 0),
+  );
 
   return (
     <section
@@ -44,29 +66,28 @@ export function Board() {
         if (dragSession.kind !== "new") return;
         e.preventDefault();
         setDropHint(false);
-        if (dragSession.id) addToBoard(dragSession.id);
+        const id = dragSession.id;
         dragSession.kind = null;
         dragSession.id = null;
+        if (!id) return;
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (rect && rect.width > 0) {
+          addToBoard(id, { x: e.clientX - rect.left, y: e.clientY - rect.top });
+        } else {
+          addToBoard(id);
+        }
       }}
     >
       <div className="board-bar">
         <span className="badge">
           {mounted.length === 0 ? "empty board" : `${mounted.length} on board`}
         </span>
-        <span className="faint board-hint">click or drag components from the sidebar</span>
+        <span className="faint board-hint">
+          {mounted.length === 0
+            ? "click or drag components from the sidebar"
+            : "drag a panel by its header to move it, the corner to resize"}
+        </span>
         <span className="spacer" />
-        <div className="chips" role="group" aria-label="Columns">
-          {[2, 3, 4].map((n) => (
-            <button
-              key={n}
-              className={`chip${prefs.columns === n ? " active" : ""}`}
-              onClick={() => setPrefs({ columns: n })}
-              title={`${n} columns`}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
         <button
           className="btn ghost small"
           onClick={addAllToBoard}
@@ -87,62 +108,35 @@ export function Board() {
         </button>
       </div>
 
-      {mounted.length === 0 ? (
-        <div className="board-empty">
-          <div className="card board-empty-card">
-            <h2>Your board is empty</h2>
-            <p className="muted">
-              Click a component in the sidebar, drag one over here, or put everything up at once.
-            </p>
-            <button
-              className="btn primary"
-              onClick={addAllToBoard}
-              disabled={components.length === 0}
-            >
-              <LayoutGrid size={14} />
-              Add all {components.length} component{components.length === 1 ? "" : "s"}
-            </button>
+      <div
+        ref={canvasRef}
+        className="board-canvas"
+        style={{ height: mounted.length > 0 ? canvasHeight : undefined }}
+      >
+        {mounted.length === 0 ? (
+          <div className="board-empty">
+            <div className="card board-empty-card">
+              <h2>Your board is empty</h2>
+              <p className="muted">
+                Click a component in the sidebar, drag one over here, or put everything up at
+                once — then arrange the panels however you like.
+              </p>
+              <button
+                className="btn primary"
+                onClick={addAllToBoard}
+                disabled={components.length === 0}
+              >
+                <LayoutGrid size={14} />
+                Add all {components.length} component{components.length === 1 ? "" : "s"}
+              </button>
+            </div>
           </div>
-        </div>
-      ) : (
-        <div
-          className="board-grid"
-          style={{ gridTemplateColumns: `repeat(${prefs.columns}, minmax(0, 1fr))` }}
-        >
-          {mounted.map((component) => (
-            <BoardPanel
-              key={component.id}
-              component={component}
-              dropSide={dropTarget?.id === component.id ? dropTarget.side : null}
-              onDragOverPanel={(side) => {
-                setDropTarget((prev) =>
-                  prev?.id === component.id && prev.side === side
-                    ? prev
-                    : { id: component.id, side },
-                );
-              }}
-              onDragLeavePanel={() => {
-                setDropTarget((prev) => (prev?.id === component.id ? null : prev));
-              }}
-              onDropPanel={() => {
-                if (
-                  dragSession.kind === "move" &&
-                  dragSession.id &&
-                  dragSession.id !== component.id
-                ) {
-                  moveOnBoard(
-                    dragSession.id,
-                    insertionIndex(board, component.id, dropTarget?.side ?? "before"),
-                  );
-                }
-                dragSession.kind = null;
-                dragSession.id = null;
-                setDropTarget(null);
-              }}
-            />
-          ))}
-        </div>
-      )}
+        ) : (
+          mounted.map((component) => (
+            <BoardPanel key={component.id} component={component} box={layout[component.id]} />
+          ))
+        )}
+      </div>
 
       {dropHint && <div className="board-drop-hint">Drop to add</div>}
     </section>

@@ -2,6 +2,7 @@
  * Small localStorage helpers with every call guarded, because private
  * windows and test environments do not always have storage.
  */
+import type { PanelBox } from "./board";
 
 export interface RecentFolder {
   root: string;
@@ -94,6 +95,7 @@ export function clearLastFolder(): void {
 
 const boardKey = (root: string) => `htmlove:board:${root}`;
 const propsKey = (root: string) => `htmlove:props:${root}`;
+const layoutKey = (root: string) => `htmlove:layout:${root}`;
 
 export function getBoard(root: string): string[] {
   try {
@@ -135,18 +137,34 @@ export function saveStoredProps(root: string, props: Record<string, Record<strin
   }
 }
 
+/** Panel rectangles on the board canvas; validated by normalizeLayout. */
+export function getLayout(root: string): unknown {
+  try {
+    const raw = localStorage.getItem(layoutKey(root));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveLayout(root: string, layout: Record<string, PanelBox>): void {
+  try {
+    localStorage.setItem(layoutKey(root), JSON.stringify(layout));
+  } catch {
+    /* ignore */
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* playground preferences                                              */
 /* ------------------------------------------------------------------ */
 
 export interface Prefs {
   paused: boolean;
-  /** Dashboard grid columns. */
-  columns: number;
 }
 
 const PREFS_KEY = "htmlove:prefs";
-const DEFAULT_PREFS: Prefs = { paused: false, columns: 3 };
+const DEFAULT_PREFS: Prefs = { paused: false };
 
 export function getPrefs(): Prefs {
   try {
@@ -155,10 +173,6 @@ export function getPrefs(): Prefs {
     const parsed = JSON.parse(raw) as Partial<Prefs>;
     return {
       paused: typeof parsed.paused === "boolean" ? parsed.paused : DEFAULT_PREFS.paused,
-      columns:
-        typeof parsed.columns === "number" && parsed.columns >= 2 && parsed.columns <= 4
-          ? Math.round(parsed.columns)
-          : DEFAULT_PREFS.columns,
     };
   } catch {
     return { ...DEFAULT_PREFS };

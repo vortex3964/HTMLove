@@ -1400,10 +1400,11 @@ body {
   font-size: 12px;
 }
 
-.board-grid {
-  display: grid;
-  gap: 14px;
-  align-items: start;
+/* the free canvas the panels live on: each one is placed by its own box */
+
+.board-canvas {
+  position: relative;
+  min-height: 320px;
 }
 
 .board-drop-hint {
@@ -1476,24 +1477,79 @@ body {
   }
 }
 
-.panel.drop-before::before,
-.panel.drop-after::after {
+/* a panel is a little window on the canvas: header moves it, the corner
+   resizes it (the rules sit after `.panel` on purpose — they win) */
+
+.panel.board-panel {
+  position: absolute;
+}
+
+.board-panel:hover {
+  z-index: 5;
+}
+
+.board-panel.interacting {
+  z-index: 7;
+  box-shadow: var(--shadow-md);
+}
+
+/* during a gesture iframes must not swallow the pointer, and text must
+   not get selected */
+body.hv-panel-interacting * {
+  user-select: none !important;
+}
+
+body.hv-panel-interacting .board-panel iframe {
+  pointer-events: none;
+}
+
+.board-panel .panel-top {
+  cursor: grab;
+  touch-action: none;
+}
+
+.board-panel.gesture-move .panel-top {
+  cursor: grabbing;
+}
+
+/* the panel has a fixed height, so the preview takes what is left */
+.board-panel .panel-preview {
+  flex: 1 1 auto;
+  min-height: 120px;
+  height: auto;
+}
+
+/* leave room for the resize handle in the corner */
+.board-panel .panel-foot {
+  padding-right: 22px;
+}
+
+.panel-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  touch-action: none;
+  z-index: 4;
+  color: var(--faint);
+}
+
+.panel-resize:hover {
+  color: var(--text);
+}
+
+.panel-resize::after {
   content: "";
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: var(--accent);
-  border-radius: 2px;
-  z-index: 3;
-}
-
-.panel.drop-before::before {
-  left: -8px;
-}
-
-.panel.drop-after::after {
-  right: -8px;
+  right: 4px;
+  bottom: 4px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  border-bottom-right-radius: 2px;
 }
 
 .panel-top {

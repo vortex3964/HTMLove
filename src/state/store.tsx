@@ -1,9 +1,9 @@
 /**
  * App-wide state: the current folder session, the dashboard board (which
- * components are mounted, in what order, with which props), live edits,
- * the active view (board or dependency doctor), shared preview
- * preferences and errors. Deliberately a plain React context — no
- * external state library.
+ * components are mounted, where their panels sit and how big they are,
+ * with which props), live edits, the active view (board or dependency
+ * doctor), shared preview preferences and errors. Deliberately a plain
+ * React context — no external state library.
  */
 import {
   createContext,
@@ -22,10 +22,16 @@ import { planImports } from "../core/deps";
 import { rewriteDeadAssets } from "../core/assets";
 import {
   addToBoard as addToBoardIds,
-  moveOnBoard as moveOnBoardIds,
+  boardBoxes,
+  clampBox,
+  DEFAULT_PANEL_SIZE,
+  fillLayout,
+  freeSpot,
   normalizeBoard,
+  normalizeLayout,
   normalizeProps,
   removeFromBoard as removeFromBoardIds,
+  type PanelBox,
 } from "../core/board";
 import {
   applyManifestToCatalog,
@@ -38,10 +44,12 @@ import {
   clearLastFolder,
   getBoard,
   getLastFolder,
+  getLayout,
   getPrefs,
   getStoredProps,
   removeRecent,
   saveBoard,
+  saveLayout,
   savePrefs,
   saveStoredProps,
   setLastFolder,
@@ -88,11 +96,20 @@ export interface StoreShape {
 
   /** Component ids mounted on the board, in display order. */
   board: string[];
-  addToBoard(id: string): void;
+  /** Where each mounted panel sits and how big it is, in canvas pixels. */
+  layout: Record<string, PanelBox>;
+  /**
+   * Put a component on the board. `at` is where it was dropped on the
+   * canvas; without it the panel takes the default size in the first
+   * free slot.
+   */
+  addToBoard(id: string, at?: { x: number; y: number }): void;
   addAllToBoard(): void;
   removeFromBoard(id: string): void;
-  /** Move `id` so it lands before `beforeIndex` (an index into `board`). */
-  moveOnBoard(id: string, beforeIndex: number): void;
+  /** Move or resize a panel (called once the gesture has ended). */
+  setPanelBox(id: string, box: PanelBox): void;
+  /** The Board reports its measured width so new panels place well. */
+  setBoardWidth(width: number): void;
   clearBoard(): void;
 
   /** Component whose code is open in the left editor drawer. */
@@ -162,6 +179,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [prefs, setPrefsState] = useState<Prefs>(() => getPrefs());
   const [tokens, setTokensState] = useState<Record<string, string>>({});
   const [board, setBoard] = useState<string[]>([]);
+  const [layout, setLayout] = useState<Record<string, PanelBox>>({});
   const [propsById, setPropsById] = useState<Record<string, Record<string, unknown>>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -173,6 +191,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    */
   const sessionRef = useRef<Session | null>(null);
   const boardRef = useRef<string[]>([]);
+  const layoutRef = useRef<Record<string, PanelBox>>({});
+  /** Canvas width last measured by the Board, for placing new panels. */
+  const boardWidthRef = useRef(1200);
   const propsRef = useRef<Record<string, Record<string, unknown>>>({});
   const applySession = useCallback((next: Session) => {
     sessionRef.current = next;
@@ -180,6 +201,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
   sessionRef.current = session;
   boardRef.current = board;
+  layoutRef.current = layout;
   propsRef.current = propsById;
 
   const setPrefs = useCallback((patch: Partial<Prefs>) => {
@@ -200,6 +222,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     boardRef.current = next;
     setBoard(next);
     saveBoard(current.root, next);
+  }, []);
+
+  const commitLayout = useCallback((next: Record<string, PanelBox>) => {
+    const current = sessionRef.current;
+    if (!current || next === layoutRef.current) return;
+    layoutRef.current = next;
+    setLayout(next);
+    saveLayout(current.root, next);
   }, []);
 
   const loadFolder = useCallback(
@@ -234,6 +264,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         /* restore what this folder had mounted, minus anything gone */
         const valid = new Set(components.map((c) => c.id));
         commitBoard(normalizeBoard(getBoard(snapshot.root), valid));
+        /* every mounted panel needs a box: stored ones, or a free slot */
+        commitLayout(
+          fillLayout(
+            boardRef.current,
+            normalizeLayout(getLayout(snapshot.root), valid),
+            boardWidthRef.current,
+          ),
+        );
         const storedProps = normalizeProps(getStoredProps(snapshot.root), valid);
         propsRef.current = storedProps;
         setPropsById(storedProps);
@@ -292,44 +330,87 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const showBoard = useCallback(() => setView({ mode: "board" }), []);
 
   const addToBoard = useCallback(
-    (id: string) => commitBoard(addToBoardIds(boardRef.current, id)),
-    [commitBoard],
+    (id: string, at?: { x: number; y: number }) => {
+      const nextBoard = addToBoardIds(boardRef.current, id);
+      if (nextBoard === boardRef.current) return;
+      const width = boardWidthRef.current;
+      /* a drop lands with the pointer near the header; otherwise the
+         first free slot below/next to whatever is already there */
+      const spot = at
+        ? { x: at.x - DEFAULT_PANEL_SIZE.w / 2, y: at.y - 24 }
+        : freeSpot(boardBoxes(boardRef.current, layoutRef.current), width);
+      commitBoard(nextBoard);
+      commitLayout({
+        ...layoutRef.current,
+        [id]: clampBox({ ...spot, ...DEFAULT_PANEL_SIZE }, width),
+      });
+    },
+    [commitBoard, commitLayout],
   );
 
   const addAllToBoard = useCallback(() => {
     const current = sessionRef.current;
     if (!current) return;
-    let next = boardRef.current;
-    for (const component of current.catalog) next = addToBoardIds(next, component.id);
-    commitBoard(next);
-  }, [commitBoard]);
+    let nextBoard = boardRef.current;
+    let nextLayout = layoutRef.current;
+    for (const component of current.catalog) {
+      if (nextBoard.includes(component.id)) continue;
+      const spot = freeSpot(boardBoxes(nextBoard, nextLayout), boardWidthRef.current);
+      nextBoard = [...nextBoard, component.id];
+      nextLayout = { ...nextLayout, [component.id]: { ...spot, ...DEFAULT_PANEL_SIZE } };
+    }
+    commitBoard(nextBoard);
+    commitLayout(nextLayout);
+  }, [commitBoard, commitLayout]);
 
   const removeFromBoard = useCallback(
     (id: string) => {
       commitBoard(removeFromBoardIds(boardRef.current, id));
+      if (layoutRef.current[id]) {
+        const next = { ...layoutRef.current };
+        delete next[id];
+        commitLayout(next);
+      }
       setEditingId((prev) => (prev === id ? null : prev));
     },
-    [commitBoard],
+    [commitBoard, commitLayout],
   );
 
-  const moveOnBoard = useCallback(
-    (id: string, beforeIndex: number) => {
-      commitBoard(moveOnBoardIds(boardRef.current, id, beforeIndex));
+  const setPanelBox = useCallback(
+    (id: string, box: PanelBox) => {
+      const existing = layoutRef.current[id];
+      if (
+        existing &&
+        existing.x === box.x &&
+        existing.y === box.y &&
+        existing.w === box.w &&
+        existing.h === box.h
+      ) {
+        return;
+      }
+      commitLayout({ ...layoutRef.current, [id]: box });
     },
-    [commitBoard],
+    [commitLayout],
   );
 
-  const clearBoard = useCallback(() => commitBoard([]), [commitBoard]);
+  const setBoardWidth = useCallback((width: number) => {
+    if (width > 0) boardWidthRef.current = Math.round(width);
+  }, []);
+
+  const clearBoard = useCallback(() => {
+    commitBoard([]);
+    commitLayout({});
+  }, [commitBoard, commitLayout]);
 
   const openEditor = useCallback((id: string) => setEditingId(id), []);
   const closeEditor = useCallback(() => setEditingId(null), []);
   const openOnBoard = useCallback(
     (id: string) => {
-      commitBoard(addToBoardIds(boardRef.current, id));
+      addToBoard(id);
       setView({ mode: "board" });
       setEditingId(id);
     },
-    [commitBoard],
+    [addToBoard],
   );
 
   const setProps = useCallback((id: string, props: Record<string, unknown>) => {
@@ -613,10 +694,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       openDoctor,
       showBoard,
       board,
+      layout,
       addToBoard,
       addAllToBoard,
       removeFromBoard,
-      moveOnBoard,
+      setPanelBox,
+      setBoardWidth,
       clearBoard,
       editingId,
       openEditor,
@@ -659,10 +742,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       openDoctor,
       showBoard,
       board,
+      layout,
       addToBoard,
       addAllToBoard,
       removeFromBoard,
-      moveOnBoard,
+      setPanelBox,
+      setBoardWidth,
       clearBoard,
       editingId,
       openEditor,
