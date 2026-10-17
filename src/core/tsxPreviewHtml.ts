@@ -13,12 +13,22 @@ export interface TsxDocOptions {
   canvas?: "light" | "dark";
   paused?: boolean;
   usesTailwind?: boolean;
+  /** Props handed to the component through `window.__hvProps`. */
+  props?: Record<string, unknown>;
   /** pkg -> version pins from playground.deps.json. */
   versionOverrides?: Record<string, string>;
   /** specifier -> full URL overrides from playground.deps.json. */
   urlOverrides?: Record<string, string>;
   /** Extra CSS injected after the component's own (design tokens). */
   extraCss?: string;
+}
+
+/** JSON that is safe to sit inside an inline <script> tag. */
+function jsonForScript(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 }
 
 export function buildTsxPreviewDoc(options: TsxDocOptions): string {
@@ -29,6 +39,7 @@ export function buildTsxPreviewDoc(options: TsxDocOptions): string {
     canvas = "light",
     paused = false,
     usesTailwind = false,
+    props,
     versionOverrides,
     urlOverrides,
     extraCss = "",
@@ -38,6 +49,10 @@ export function buildTsxPreviewDoc(options: TsxDocOptions): string {
   const importMapTag =
     Object.keys(importMap.imports).length > 0
       ? `<script type="importmap">${JSON.stringify(importMap)}</script>`
+      : "";
+  const propsTag =
+    props && Object.keys(props).length > 0
+      ? `<script>window.__hvProps = ${jsonForScript(props)};</script>`
       : "";
 
   const pauseCss = paused ? "*{animation-play-state:paused !important}" : "";
@@ -58,6 +73,7 @@ ${importMapTag}
 </head>
 <body>
 <div class="hv-stage"><div id="hv-root"></div></div>
+${propsTag}
 <script type="module">${code}</script>
 <script>${PREVIEW_RUNTIME_SCRIPT}</script>
 </body>

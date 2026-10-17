@@ -181,6 +181,7 @@ describe("buildEntryModule", () => {
     const wrapper = buildEntryModule("carousel/car.tsx");
     expect(wrapper).toContain('from "./carousel/car.tsx"');
     expect(wrapper).toContain("createRoot");
+    expect(wrapper).toContain("window.__hvProps");
   });
 });
 
@@ -215,5 +216,16 @@ describe("buildTsxPreviewDoc", () => {
     });
     expect(doc).toContain('id="hv-tokens"');
     expect(doc).toContain("--primarylw:#6366f1");
+  });
+
+  it("hands props to the component through window.__hvProps, safely escaped", () => {
+    const doc = buildTsxPreviewDoc({
+      code: "x",
+      props: { slides: [{ id: 1 }], label: "</script><b>" },
+    });
+    expect(doc).toContain("window.__hvProps = ");
+    expect(doc.indexOf("__hvProps")).toBeLessThan(doc.indexOf('type="module"'));
+    expect(doc).toContain("\\u003c/script");
+    expect(doc).not.toContain("</script><b>");
   });
 });

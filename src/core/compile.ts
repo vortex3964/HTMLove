@@ -107,11 +107,12 @@ class __HvBoundary extends React.Component {
 
 const __hvRootEl = document.getElementById("hv-root");
 const __hvComp = __hvPick();
+const __hvProps = (typeof window !== "undefined" && window.__hvProps) || {};
 if (!__hvComp) {
   __hvRootEl.innerHTML =
     '<div style="padding:14px 16px;font-family:ui-monospace,monospace;font-size:12px;color:#71717a;border:1px dashed #d4d4dc;border-radius:8px">No component export found in this file — it only exports helpers.</div>';
 } else {
-  createRoot(__hvRootEl).render(React.createElement(__HvBoundary, null, React.createElement(__hvComp)));
+  createRoot(__hvRootEl).render(React.createElement(__HvBoundary, null, React.createElement(__hvComp, __hvProps)));
 }
 `.trim();
 }

@@ -32,10 +32,32 @@ interface PreviewFrameProps {
   /** Force a fresh reload when this changes. */
   reloadKey?: number;
   className?: string;
+  /** Props handed to the component (window.__hvProps). */
+  props?: Record<string, unknown>;
   /** Extra CSS injected after the component's own (design tokens). */
   extraCss?: string;
   /** Report errors upward as well (detail view shows them elsewhere). */
   onErrors?(errors: PreviewError[]): void;
+}
+
+/**
+ * A plain-language guess at what went wrong, shown under the raw error.
+ * These three families cover almost every failure this playground sees.
+ */
+export function errorHint(message: string): string | null {
+  if (/reading '(map|length|forEach|filter|find|slice|reduce|join|split)'/.test(message)) {
+    return "This component probably needs props — open its props editor ({} in the panel header) and provide them.";
+  }
+  if (/useStore must be used inside|must be used within a .*Provider|createContext/i.test(message)) {
+    return "This component expects to run inside its own app — the context/provider it relies on does not exist in the sandbox.";
+  }
+  if (/Unrecognized extension value|same instance|instanceof/i.test(message)) {
+    return "A library got loaded twice with different copies of its core module — a version pin in the manifest can share one copy.";
+  }
+  if (/Cannot convert undefined or null to object|is not iterable/.test(message)) {
+    return "A value this component expects is missing — check its props.";
+  }
+  return null;
 }
 
 /** The sources a component renders from, honouring live drafts. */
@@ -62,6 +84,7 @@ export function PreviewFrame({
   paused,
   reloadKey = 0,
   className,
+  props,
   extraCss,
   onErrors,
 }: PreviewFrameProps) {
@@ -148,11 +171,12 @@ export function PreviewFrame({
       canvas,
       paused,
       usesTailwind: component.usesTailwind,
+      props,
       versionOverrides: manifest.packages,
       urlOverrides: manifest.urls,
       extraCss: tokenCss,
     });
-  }, [compiled, canvas, paused, component.usesTailwind, manifest, tokenCss]);
+  }, [compiled, canvas, paused, component.usesTailwind, props, manifest, tokenCss]);
 
   /* ---------------- html pipeline ---------------- */
   const doc = useMemo(
@@ -241,13 +265,19 @@ export function PreviewFrame({
         )}
         {errors.length > 0 && (
           <div className="preview-errors" role="status">
-            {errors.map((err, i) => (
-              <div key={i} className="preview-error">
-                <TriangleAlert size={12} />
-                <span>{err.message}</span>
-                {err.detail && <span className="faint mono">{err.detail}</span>}
-              </div>
-            ))}
+            {errors.map((err, i) => {
+              const hint = errorHint(err.message);
+              return (
+                <div key={i} className="preview-error">
+                  <TriangleAlert size={12} />
+                  <div className="preview-error-text">
+                    <span>{err.message}</span>
+                    {err.detail && <span className="faint mono">{err.detail}</span>}
+                    {hint && <span className="preview-hint">{hint}</span>}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
