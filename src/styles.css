@@ -756,7 +756,7 @@ body {
   font-size: 14px;
 }
 
-/* ---------- editor drawer (slides in on the left) ---------- */
+/* ---------- editor drawer (slides in on the right) ---------- */
 
 .drawer {
   flex: 0 0 auto;
@@ -765,14 +765,14 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid var(--border);
+  border-left: 1px solid var(--border);
   background: var(--panel);
-  animation: hv-slide-in 180ms ease;
+  animation: hv-slide-in-right 180ms ease;
 }
 
-@keyframes hv-slide-in {
+@keyframes hv-slide-in-right {
   from {
-    transform: translateX(-14px);
+    transform: translateX(14px);
     opacity: 0;
   }
   to {

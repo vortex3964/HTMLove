@@ -171,6 +171,10 @@ describe("the htmlove app", () => {
     const drawer = container.querySelector(".drawer");
     expect(drawer).toBeTruthy();
     expect(drawer?.textContent).toContain("alpha.html");
+    /* the drawer is the rightmost column; the sidebar stays visible */
+    const workspace = container.querySelector(".workspace");
+    expect(workspace?.lastElementChild?.classList.contains("drawer")).toBe(true);
+    expect(container.querySelector(".sidebar")).toBeTruthy();
 
     await click(container.querySelector<HTMLElement>('[aria-label="Close the editor"]')!);
     expect(container.querySelector(".drawer")).toBeNull();

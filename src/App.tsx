@@ -223,8 +223,9 @@ function Shell() {
           <DoctorView />
         ) : (
           <div className="workspace">
-            {editingId ? <EditorDrawer /> : <Sidebar />}
+            <Sidebar />
             <Board />
+            {editingId && <EditorDrawer />}
           </div>
         )}
       </main>

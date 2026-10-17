@@ -5,7 +5,7 @@
  * preview. Save writes every dirty file back to disk.
  */
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Boxes, Paintbrush, RotateCcw, Save } from "lucide-react";
+import { ArrowRight, Boxes, Paintbrush, RotateCcw, Save } from "lucide-react";
 import { useStore } from "../state/store";
 import { KindBadge } from "./Badges";
 import { CodeEditor } from "./CodeEditor";
@@ -105,7 +105,7 @@ export function EditorDrawer() {
           title="Back to the full board (Esc)"
           aria-label="Close the editor"
         >
-          <ArrowLeft size={14} />
+          <ArrowRight size={14} />
         </button>
         <span className="drawer-name">{component.name}</span>
         <KindBadge kind={component.kind} />
