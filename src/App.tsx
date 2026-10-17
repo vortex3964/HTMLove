@@ -7,13 +7,11 @@ import { useCallback, useEffect } from "react";
 import {
   FolderOpen,
   LayoutGrid,
-  Moon,
   Pause,
   Play,
   RefreshCw,
   Save,
   Stethoscope,
-  Sun,
   TriangleAlert,
   X,
 } from "lucide-react";
@@ -122,14 +120,6 @@ function Shell() {
               aria-label={prefs.paused ? "Resume animations" : "Pause animations"}
             >
               {prefs.paused ? <Play size={13} /> : <Pause size={13} />}
-            </button>
-            <button
-              className="btn ghost small icon"
-              onClick={() => setPrefs({ canvas: prefs.canvas === "light" ? "dark" : "light" })}
-              title="Toggle preview background"
-              aria-label="Toggle preview background"
-            >
-              {prefs.canvas === "light" ? <Moon size={13} /> : <Sun size={13} />}
             </button>
             <button
               className="btn ghost small icon"

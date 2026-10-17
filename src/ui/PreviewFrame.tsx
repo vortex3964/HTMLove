@@ -27,7 +27,8 @@ export interface PreviewError {
 interface PreviewFrameProps {
   component: Component;
   session: Session;
-  canvas: "light" | "dark";
+  /** Preview background; light by default until htmlove grows a dark theme. */
+  canvas?: "light" | "dark";
   paused: boolean;
   /** Force a fresh reload when this changes. */
   reloadKey?: number;
@@ -80,7 +81,7 @@ export function resolvePreviewSource(
 export function PreviewFrame({
   component,
   session,
-  canvas,
+  canvas = "light",
   paused,
   reloadKey = 0,
   className,

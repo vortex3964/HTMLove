@@ -141,13 +141,12 @@ export function saveStoredProps(root: string, props: Record<string, Record<strin
 
 export interface Prefs {
   paused: boolean;
-  canvas: "light" | "dark";
   /** Dashboard grid columns. */
   columns: number;
 }
 
 const PREFS_KEY = "htmlove:prefs";
-const DEFAULT_PREFS: Prefs = { paused: false, canvas: "light", columns: 3 };
+const DEFAULT_PREFS: Prefs = { paused: false, columns: 3 };
 
 export function getPrefs(): Prefs {
   try {
@@ -156,7 +155,6 @@ export function getPrefs(): Prefs {
     const parsed = JSON.parse(raw) as Partial<Prefs>;
     return {
       paused: typeof parsed.paused === "boolean" ? parsed.paused : DEFAULT_PREFS.paused,
-      canvas: parsed.canvas === "dark" ? "dark" : "light",
       columns:
         typeof parsed.columns === "number" && parsed.columns >= 2 && parsed.columns <= 4
           ? Math.round(parsed.columns)

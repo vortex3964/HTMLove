@@ -140,7 +140,6 @@ export function BoardPanel({
           <PreviewFrame
             component={component}
             session={session}
-            canvas={prefs.canvas}
             paused={prefs.paused}
             reloadKey={reloadKey}
             props={props}
