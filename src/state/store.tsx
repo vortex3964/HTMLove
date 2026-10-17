@@ -1,5 +1,6 @@
 /**
- * App-wide state: the current folder session, scanning progress and errors.
+ * App-wide state: the current folder session, the active view (gallery or
+ * a component's detail), shared preview preferences and errors.
  * Deliberately a plain React context — no external state library needed.
  */
 import {
@@ -11,10 +12,17 @@ import {
   type ReactNode,
 } from "react";
 import { buildCatalog } from "../core/catalog";
-import { addRecent } from "../core/persist";
+import {
+  addRecent,
+  getPrefs,
+  savePrefs,
+  type Prefs,
+} from "../core/persist";
 import type { Session } from "../core/types";
 import { serverBackend } from "../backends/server";
 import type { FileBackend } from "../backends/types";
+
+export type ViewState = { mode: "gallery" } | { mode: "detail"; id: string };
 
 export interface StoreShape {
   backend: FileBackend;
@@ -28,6 +36,13 @@ export interface StoreShape {
   closePicker(): void;
   loadFolder(root: string): Promise<void>;
   rescan(): Promise<void>;
+
+  view: ViewState;
+  openComponent(id: string): void;
+  backToGallery(): void;
+
+  prefs: Prefs;
+  setPrefs(patch: Partial<Prefs>): void;
 }
 
 const StoreContext = createContext<StoreShape | null>(null);
@@ -38,6 +53,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [view, setView] = useState<ViewState>({ mode: "gallery" });
+  const [prefs, setPrefsState] = useState<Prefs>(() => getPrefs());
+
+  const setPrefs = useCallback((patch: Partial<Prefs>) => {
+    setPrefsState((prev) => {
+      const next = { ...prev, ...patch };
+      savePrefs(next);
+      return next;
+    });
+  }, []);
 
   const loadFolder = useCallback(
     async (root: string) => {
@@ -57,6 +82,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           catalog: components,
         });
         addRecent(snapshot.root, snapshot.label);
+        setView({ mode: "gallery" });
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -73,6 +99,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const openPicker = useCallback(() => setPickerOpen(true), []);
   const closePicker = useCallback(() => setPickerOpen(false), []);
   const clearError = useCallback(() => setError(null), []);
+  const openComponent = useCallback(
+    (id: string) => setView({ mode: "detail", id }),
+    [],
+  );
+  const backToGallery = useCallback(() => setView({ mode: "gallery" }), []);
 
   const value = useMemo<StoreShape>(
     () => ({
@@ -86,8 +117,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       closePicker,
       loadFolder,
       rescan,
+      view,
+      openComponent,
+      backToGallery,
+      prefs,
+      setPrefs,
     }),
-    [backend, session, busy, error, clearError, pickerOpen, openPicker, closePicker, loadFolder, rescan],
+    [
+      backend,
+      session,
+      busy,
+      error,
+      clearError,
+      pickerOpen,
+      openPicker,
+      closePicker,
+      loadFolder,
+      rescan,
+      view,
+      openComponent,
+      backToGallery,
+      prefs,
+      setPrefs,
+    ],
   );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

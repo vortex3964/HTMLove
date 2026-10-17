@@ -45,3 +45,37 @@ export function removeRecent(root: string): void {
     /* ignore */
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* gallery / playground preferences                                    */
+/* ------------------------------------------------------------------ */
+
+export interface Prefs {
+  paused: boolean;
+  canvas: "light" | "dark";
+}
+
+const PREFS_KEY = "htmlove:prefs";
+const DEFAULT_PREFS: Prefs = { paused: false, canvas: "light" };
+
+export function getPrefs(): Prefs {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) return { ...DEFAULT_PREFS };
+    const parsed = JSON.parse(raw) as Partial<Prefs>;
+    return {
+      paused: typeof parsed.paused === "boolean" ? parsed.paused : DEFAULT_PREFS.paused,
+      canvas: parsed.canvas === "dark" ? "dark" : "light",
+    };
+  } catch {
+    return { ...DEFAULT_PREFS };
+  }
+}
+
+export function savePrefs(prefs: Prefs): void {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    /* ignore */
+  }
+}
