@@ -112,11 +112,11 @@ function fixtureSnapshot(): RawSnapshot {
     files: {
       "ChoiceMenu/hi.html": '<div class="card"><ul class="list"></ul></div>',
       "ChoiceMenu/hi.css":
-        ".card { width: 200px; }\n/* From Uiverse.io by nazar-gavrylyk */",
+        ".card { width: 200px; background: url(https://cdn.example.com/pattern.png); }\n/* From Uiverse.io by nazar-gavrylyk */",
       "DiskRoll/hi.html":
         '<div class="flex flex-col items-center h-16 rounded-full shadow-md animate-[spin_3s_linear_infinite]"></div>',
       "carousel/car.tsx":
-        'import React from "react";\nexport default function Car() { return <div className="flex items-center gap-4 rounded-2xl bg-white p-4">x</div>; }',
+        'import React from "react";\nconst pic = "https://images.unsplash.com/photo-123?w=600";\nexport default function Car() { return <img className="flex items-center gap-4 rounded-2xl bg-white p-4" src={pic} />; }',
       "ui componensts/loading.txt":
         "/* From Uiverse.io by PriyanshuGupta28 */\n.spinner { width: 9px; }\n\n<div class=\"spinner\"><div></div></div>",
       "ui componensts/playing.txt": ".loading { display: flex; }",
@@ -190,6 +190,26 @@ describe("buildCatalog", () => {
     expect(supportFiles).toContain("utils/helper.ts");
     expect(supportFiles).toContain("README.md");
     expect(components.find((c) => c.id === "playground.deps.json")).toBeUndefined();
+  });
+
+  it("plans react imports and lists remote assets", () => {
+    const car = byName.get("carousel")!;
+    expect(car.imports.find((entry) => entry.specifier === "react")).toMatchObject({
+      status: "react",
+    });
+    expect(car.remoteAssets).toEqual(["https://images.unsplash.com/photo-123?w=600"]);
+
+    const choice = byName.get("ChoiceMenu")!;
+    expect(choice.imports).toEqual([]);
+    expect(choice.remoteAssets).toEqual(["https://cdn.example.com/pattern.png"]);
+  });
+
+  it("lets a manifest stub change the import plan", () => {
+    const { components: stubbed } = buildCatalog(fixtureSnapshot(), { stubs: ["react"] });
+    const car = stubbed.find((c) => c.name === "carousel")!;
+    expect(car.imports.find((entry) => entry.specifier === "react")).toMatchObject({
+      status: "stub",
+    });
   });
 
   it("sorts components by name", () => {

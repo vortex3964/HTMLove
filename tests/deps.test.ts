@@ -41,6 +41,32 @@ describe("planImports", () => {
     const plan = planImports(`import logo from "@/assets/logo.png";`, "x.tsx", files, assets);
     expect(plan[0]).toMatchObject({ status: "asset", resolved: "assets/logo.png" });
   });
+
+  it("honours manifest stubs and custom urls", () => {
+    const plan = planImports(source, "carousel/car.tsx", files, assets, {
+      stubs: ["lucide-react"],
+      urls: { "./card": "https://example.com/card.js" },
+    });
+    const bySpec = new Map(plan.map((p) => [p.specifier, p]));
+
+    expect(bySpec.get("lucide-react")).toMatchObject({
+      status: "stub",
+      note: "stubbed via playground.deps.json",
+    });
+    expect(bySpec.get("./card")).toMatchObject({
+      status: "external",
+      note: "custom URL from playground.deps.json",
+    });
+  });
+
+  it("notes version pins from the manifest", () => {
+    const plan = planImports(source, "carousel/car.tsx", files, assets, {
+      packages: { "lucide-react": "0.469.0" },
+    });
+    expect(plan.find((p) => p.specifier === "lucide-react")!.note).toBe(
+      "pinned to 0.469.0 on esm.sh",
+    );
+  });
 });
 
 describe("esmUrl", () => {

@@ -6,7 +6,9 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  Boxes,
   Moon,
+  Paintbrush,
   Pause,
   Play,
   RefreshCw,
@@ -18,6 +20,8 @@ import { useStore } from "../state/store";
 import { PreviewFrame } from "./PreviewFrame";
 import { KindBadge } from "./Badges";
 import { CodeEditor } from "./CodeEditor";
+import { DepsPanel } from "./DepsPanel";
+import { TokensPanel } from "./TokensPanel";
 import { useDebounced } from "./useDebounced";
 import {
   componentPaths,
@@ -25,6 +29,7 @@ import {
   languageFor,
 } from "../core/edits";
 import { getDraft } from "../core/drafts";
+import { missingTokens } from "../core/tokens";
 import { baseOf } from "../core/catalog";
 
 export function DetailView() {
@@ -45,6 +50,7 @@ export function DetailView() {
   const [reloadKey, setReloadKey] = useState(0);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [restored, setRestored] = useState<string[]>([]);
+  const [panel, setPanel] = useState<"deps" | "tokens" | null>(null);
 
   const component = useMemo(
     () =>
@@ -73,6 +79,15 @@ export function DetailView() {
   }, [component?.id]);
 
   const dirtySet = useMemo(() => new Set(dirty), [dirty]);
+
+  const stubCount = component
+    ? component.imports.filter((entry) => entry.status === "stub").length
+    : 0;
+  const tokenCount = useMemo(() => {
+    if (!session || !component) return 0;
+    const sources = componentPaths(component).map((path) => effectiveFile(session, path));
+    return missingTokens(sources).length;
+  }, [session, component]);
 
   /* calm the preview while typing */
   const debouncedEdits = useDebounced(session?.edits, 350);
@@ -183,13 +198,36 @@ export function DetailView() {
             <div className="preview-note">This component has no editable files.</div>
           )}
           <div className="code-foot faint mono">
-            {activePath ?? ""}
-            {dirtySet.has(activePath ?? "") ? (
-              <span className="code-foot-dirty">● unsaved changes</span>
-            ) : (
-              <span> · in sync with disk</span>
-            )}
+            <span className="code-foot-path">
+              {activePath ?? ""}
+              {dirtySet.has(activePath ?? "") ? (
+                <span className="code-foot-dirty">● unsaved changes</span>
+              ) : (
+                <span> · in sync with disk</span>
+              )}
+            </span>
+            <span className="spacer" />
+            <button
+              className={`btn ghost small${panel === "deps" ? " active" : ""}`}
+              onClick={() => setPanel(panel === "deps" ? null : "deps")}
+              title="What this component imports and how each import resolves"
+            >
+              <Boxes size={12} />
+              Deps
+              {stubCount > 0 && <span className="badge warn">{stubCount}</span>}
+            </button>
+            <button
+              className={`btn ghost small${panel === "tokens" ? " active" : ""}`}
+              onClick={() => setPanel(panel === "tokens" ? null : "tokens")}
+              title="CSS custom properties this component uses"
+            >
+              <Paintbrush size={12} />
+              Tokens
+              {tokenCount > 0 && <span className="badge warn">{tokenCount}</span>}
+            </button>
           </div>
+          {panel === "deps" && <DepsPanel component={component} />}
+          {panel === "tokens" && <TokensPanel component={component} />}
         </section>
 
         <section className="detail-preview">

@@ -17,6 +17,8 @@ export interface TsxDocOptions {
   versionOverrides?: Record<string, string>;
   /** specifier -> full URL overrides from playground.deps.json. */
   urlOverrides?: Record<string, string>;
+  /** Extra CSS injected after the component's own (design tokens). */
+  extraCss?: string;
 }
 
 export function buildTsxPreviewDoc(options: TsxDocOptions): string {
@@ -29,6 +31,7 @@ export function buildTsxPreviewDoc(options: TsxDocOptions): string {
     usesTailwind = false,
     versionOverrides,
     urlOverrides,
+    extraCss = "",
   } = options;
 
   const importMap = buildImportMap(externals, versionOverrides, urlOverrides);
@@ -49,6 +52,7 @@ ${usesTailwind ? `<script src="${TAILWIND_CDN}"></script>` : ""}
 <style>${previewBaseCss(canvas)}
 ${rootCss}</style>
 ${css ? `<style id="hv-component-css">${css}</style>` : ""}
+${extraCss ? `<style id="hv-tokens">${extraCss}</style>` : ""}
 ${pauseCss ? `<style id="hv-pause">${pauseCss}</style>` : ""}
 ${importMapTag}
 </head>

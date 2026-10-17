@@ -31,6 +31,11 @@ export interface CompileInput {
   getEsbuild(): Promise<EsbuildLike>;
   /** "/" for wasm (browser), something real for native esbuild in tests. */
   absWorkingDir?: string;
+  /**
+   * Specifiers to stub instead of fetching (playground.deps.json "stubs").
+   * React itself is never stubbed — the entry wrapper needs it.
+   */
+  forceStub?: Set<string>;
 }
 
 export type CompileResult =
@@ -113,6 +118,11 @@ if (!__hvComp) {
 
 export async function compileTsxComponent(input: CompileInput): Promise<CompileResult> {
   const { source, path, files, assets, getEsbuild, absWorkingDir = "/" } = input;
+  const forceStub = new Set(
+    [...(input.forceStub ?? [])].filter(
+      (spec) => spec !== "react" && !spec.startsWith("react-dom"),
+    ),
+  );
 
   const esbuild = await getEsbuild();
   const externals = new Set<string>();
@@ -141,7 +151,7 @@ export async function compileTsxComponent(input: CompileInput): Promise<CompileR
         if (args.kind === "entry-point") return { path: ENTRY_MODULE, namespace: "hv-entry" };
         const spec = args.path;
         if (/^https?:\/\//.test(spec) || spec.startsWith("data:")) return { external: true };
-        if (isNpmSpecifier(spec)) {
+        if (!forceStub.has(spec) && isNpmSpecifier(spec)) {
           externals.add(spec);
           return { external: true };
         }
@@ -259,7 +269,8 @@ const compileCache = new Map<string, CompileResult>();
 
 /** Compile with a tiny cache so toggling the canvas does not rebuild. */
 export async function compileTsxComponentCached(input: CompileInput): Promise<CompileResult> {
-  const key = `${input.path}::${input.source}`;
+  const stubKey = input.forceStub ? [...input.forceStub].sort().join("|") : "";
+  const key = `${input.path}::${input.source}::${stubKey}`;
   const hit = compileCache.get(key);
   if (hit) return hit;
   const result = await compileTsxComponent(input);

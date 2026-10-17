@@ -1,11 +1,12 @@
 /**
  * htmlove — a local playground for HTML, CSS and React component snippets.
  */
-import { FolderOpen, RefreshCw, Save, X } from "lucide-react";
+import { FolderOpen, RefreshCw, Save, Stethoscope, X } from "lucide-react";
 import { StoreProvider, useStore } from "./state/store";
 import { FolderPicker } from "./ui/FolderPicker";
 import { Gallery } from "./ui/Gallery";
 import { DetailView } from "./ui/DetailView";
+import { DoctorView } from "./ui/DoctorView";
 
 function Shell() {
   const {
@@ -19,8 +20,17 @@ function Shell() {
     dirty,
     saveEdits,
     saving,
+    openDoctor,
   } = useStore();
   const inDetail = view.mode === "detail";
+  const inDoctor = view.mode === "doctor";
+  const stubCount = session
+    ? session.catalog.reduce(
+        (total, component) =>
+          total + component.imports.filter((entry) => entry.status === "stub").length,
+        0,
+      )
+    : 0;
 
   return (
     <div className="app">
@@ -38,6 +48,17 @@ function Shell() {
               <FolderOpen size={13} />
               <span className="path">{session.root}</span>
             </span>
+            {!inDoctor && (
+              <button
+                className="btn ghost small"
+                onClick={openDoctor}
+                title="Check imports, CDN reachability and remote assets"
+              >
+                <Stethoscope size={13} />
+                Doctor
+                {stubCount > 0 && <span className="badge warn">{stubCount}</span>}
+              </button>
+            )}
             <button
               className="btn ghost small"
               onClick={() => void rescan()}
@@ -115,6 +136,8 @@ function Shell() {
           </div>
         ) : inDetail ? (
           <DetailView />
+        ) : inDoctor ? (
+          <DoctorView />
         ) : (
           <Gallery />
         )}

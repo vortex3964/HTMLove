@@ -1,6 +1,7 @@
 /**
  * Shared types for the htmlove playground.
  */
+import type { PlanEntry } from "./deps";
 
 /** A raw folder reading as produced by a backend. */
 export interface RawSnapshot {
@@ -39,6 +40,10 @@ export interface Component {
   cssOnly: boolean;
   /** Images sitting next to the component (used as gallery thumbnails). */
   screenshots: string[];
+  /** Static import plan (React sources only, otherwise empty). */
+  imports: PlanEntry[];
+  /** Remote urls referenced by the component (images, fonts, backgrounds). */
+  remoteAssets: string[];
 }
 
 export interface CatalogResult {

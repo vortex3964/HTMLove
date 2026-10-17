@@ -21,11 +21,19 @@ export interface PlanEntry {
   note: string;
 }
 
+/** The slice of playground.deps.json that shapes the import plan. */
+export interface ManifestLike {
+  packages?: Record<string, string>;
+  urls?: Record<string, string>;
+  stubs?: string[];
+}
+
 export function planImports(
   source: string,
   importerPath: string,
   files: ReadonlySet<string>,
   assets: ReadonlySet<string>,
+  manifest?: ManifestLike,
 ): PlanEntry[] {
   const known = new Set<string>([...files, ...assets]);
   const entries: PlanEntry[] = [];
@@ -33,6 +41,24 @@ export function planImports(
   for (const ref of parseImports(source)) {
     const names = ref.names.filter((n) => n.kind !== "namespace").map((n) => n.imported);
 
+    if (manifest?.stubs?.includes(ref.specifier)) {
+      entries.push({
+        specifier: ref.specifier,
+        status: "stub",
+        names,
+        note: "stubbed via playground.deps.json",
+      });
+      continue;
+    }
+    if (manifest?.urls?.[ref.specifier]) {
+      entries.push({
+        specifier: ref.specifier,
+        status: "external",
+        names,
+        note: "custom URL from playground.deps.json",
+      });
+      continue;
+    }
     if (REACT_SPECIFIERS.has(ref.specifier)) {
       entries.push({ specifier: ref.specifier, status: "react", names, note: "provided by htmlove" });
       continue;
@@ -42,7 +68,13 @@ export function planImports(
       continue;
     }
     if (isNpmSpecifier(ref.specifier)) {
-      entries.push({ specifier: ref.specifier, status: "external", names, note: "loaded from esm.sh" });
+      const pinned = manifest?.packages?.[ref.specifier];
+      entries.push({
+        specifier: ref.specifier,
+        status: "external",
+        names,
+        note: pinned ? `pinned to ${pinned} on esm.sh` : "loaded from esm.sh",
+      });
       continue;
     }
 

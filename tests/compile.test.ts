@@ -142,6 +142,38 @@ describe("compileTsxComponent", () => {
     );
     expect(result.ok).toBe(false);
   });
+
+  it("stubs specifiers forced by the manifest instead of fetching them", async () => {
+    const source = `import { Ghost } from "ghost-pkg";\nexport default function X() { return <Ghost>hi</Ghost>; }`;
+    const result = await compileTsxComponent(
+      input({
+        source,
+        path: "x/X.tsx",
+        files: new Map([["x/X.tsx", source]]),
+        forceStub: new Set(["ghost-pkg"]),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.stubs).toEqual(["ghost-pkg"]);
+    expect(result.externals).not.toContain("ghost-pkg");
+    expect(result.code).toContain("data-htmlove-stub");
+  });
+
+  it("never force-stubs react itself", async () => {
+    const source = `import React from "react";\nexport default function X() { return <div>ok</div>; }`;
+    const result = await compileTsxComponent(
+      input({
+        source,
+        path: "x/X.tsx",
+        files: new Map([["x/X.tsx", source]]),
+        forceStub: new Set(["react"]),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.externals).toContain("react");
+  });
 });
 
 describe("buildEntryModule", () => {
@@ -174,5 +206,14 @@ describe("buildTsxPreviewDoc", () => {
       urlOverrides: { "@/registry/magicui/file-tree": "https://example.com/file-tree.js" },
     });
     expect(doc).toContain("https://example.com/file-tree.js");
+  });
+
+  it("injects design-token css into the preview document", () => {
+    const doc = buildTsxPreviewDoc({
+      code: "x",
+      extraCss: ":root{--primarylw:#6366f1}",
+    });
+    expect(doc).toContain('id="hv-tokens"');
+    expect(doc).toContain("--primarylw:#6366f1");
   });
 });

@@ -14,6 +14,8 @@ import { buildTsxPreviewDoc } from "../core/tsxPreviewHtml";
 import { splitTxtSource } from "../core/catalog";
 import { effectiveFile } from "../core/edits";
 import { compileTsxComponentCached, getBrowserEsbuild, type CompileResult } from "../core/compile";
+import { componentTokens } from "../core/manifest";
+import { buildTokenCss, missingTokens, suggestTokenValue } from "../core/tokens";
 import { useStore } from "../state/store";
 import type { Component, Session } from "../core/types";
 
@@ -65,9 +67,42 @@ export function PreviewFrame({
 }: PreviewFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [errors, setErrors] = useState<PreviewError[]>([]);
-  const { backend } = useStore();
+  const { backend, manifest, tokens } = useStore();
 
   const source = useMemo(() => resolvePreviewSource(component, session), [component, session]);
+
+  /**
+   * Design tokens. Anything the component uses but never defines gets a
+   * sensible default so previews look right out of the box; manifest
+   * values come next and the user's in-session tweaks win over both.
+   */
+  const tokenCss = useMemo(() => {
+    const effective: Record<string, string> = {};
+    for (const name of missingTokens([source.html, source.css, source.tsx ?? ""])) {
+      effective[`--${name}`] = suggestTokenValue(name);
+    }
+    const normalize = (record: Record<string, string>) =>
+      Object.fromEntries(
+        Object.entries(record).map(([key, value]) => [
+          key.startsWith("--") ? key : `--${key}`,
+          value,
+        ]),
+      );
+    Object.assign(
+      effective,
+      normalize(componentTokens(manifest, component)),
+      normalize(tokens),
+    );
+    return [buildTokenCss(effective), extraCss ?? ""].filter((part) => part.trim() !== "").join("\n");
+  }, [source, manifest, component, tokens, extraCss]);
+
+  const forceStub = useMemo(
+    () =>
+      new Set(
+        (manifest.stubs ?? []).filter((spec) => spec !== "react" && !spec.startsWith("react-dom")),
+      ),
+    [manifest.stubs],
+  );
 
   /* ---------------- react pipeline ---------------- */
   const isReact = component.kind === "tsx" && component.tsxPath !== undefined;
@@ -84,6 +119,7 @@ export function PreviewFrame({
       files: session.files,
       assets: new Set(session.assets.keys()),
       getEsbuild: getBrowserEsbuild,
+      forceStub,
     })
       .then((result) => {
         if (cancelled) return;
@@ -101,7 +137,7 @@ export function PreviewFrame({
     return () => {
       cancelled = true;
     };
-  }, [isReact, source.tsx, component.tsxPath, session.files, session.assets]);
+  }, [isReact, source.tsx, component.tsxPath, session.files, session.assets, forceStub]);
 
   const tsxDoc = useMemo(() => {
     if (!compiled || !compiled.ok) return null;
@@ -112,8 +148,11 @@ export function PreviewFrame({
       canvas,
       paused,
       usesTailwind: component.usesTailwind,
+      versionOverrides: manifest.packages,
+      urlOverrides: manifest.urls,
+      extraCss: tokenCss,
     });
-  }, [compiled, canvas, paused, component.usesTailwind]);
+  }, [compiled, canvas, paused, component.usesTailwind, manifest, tokenCss]);
 
   /* ---------------- html pipeline ---------------- */
   const doc = useMemo(
@@ -124,9 +163,9 @@ export function PreviewFrame({
         usesTailwind: component.usesTailwind,
         canvas,
         paused,
-        extraCss,
+        extraCss: tokenCss,
       }),
-    [source, component.usesTailwind, canvas, paused, extraCss],
+    [source, component.usesTailwind, canvas, paused, tokenCss],
   );
 
   /* fresh document: drop stale errors */

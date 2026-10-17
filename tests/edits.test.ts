@@ -86,6 +86,8 @@ describe("componentPaths / languageFor", () => {
     usesTailwind: false,
     cssOnly: false,
     screenshots: [],
+    imports: [],
+    remoteAssets: [],
   };
 
   it("collects every file of a component in tab order", () => {

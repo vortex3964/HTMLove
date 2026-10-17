@@ -9,6 +9,8 @@
  * so everything here is heuristic and heavily unit-tested.
  */
 import type { CatalogResult, Component, RawSnapshot } from "./types";
+import { planImports, type ManifestLike } from "./deps";
+import { extractRemoteAssets } from "./assets";
 
 /* ------------------------------------------------------------------ */
 /* path helpers                                                        */
@@ -134,11 +136,13 @@ export function detectTailwind(source: string): boolean {
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "svg", "bmp"]);
 const SUPPORT_EXTENSIONS = new Set(["ts", "js", "mjs", "cjs", "md"]);
 
-export function buildCatalog(snapshot: RawSnapshot): CatalogResult {
+export function buildCatalog(snapshot: RawSnapshot, manifest?: ManifestLike): CatalogResult {
   const { files, assets } = snapshot;
   const components: Component[] = [];
   const configFiles: string[] = [];
   const supportFiles: string[] = [];
+  const fileKeys = new Set(Object.keys(files));
+  const assetKeys = new Set(Object.keys(assets));
 
   /* group all files by the folder they live in */
   const byDir = new Map<string, string[]>();
@@ -247,6 +251,16 @@ export function buildCatalog(snapshot: RawSnapshot): CatalogResult {
         usesTailwind,
         cssOnly,
         screenshots,
+        imports:
+          cand.kind === "tsx"
+            ? planImports(tsxText, cand.primary, fileKeys, assetKeys, manifest)
+            : [],
+        remoteAssets: extractRemoteAssets({
+          html: htmlText,
+          css: cssText,
+          tsx: tsxText,
+          txt: txtText,
+        }),
       });
     }
   }

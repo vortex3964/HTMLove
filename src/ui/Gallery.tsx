@@ -189,6 +189,19 @@ function GalleryTile({ component }: { component: Component }) {
 
       <footer className="tile-foot">
         {component.usesTailwind && <span className="badge">tailwind</span>}
+        {component.imports.some((entry) => entry.status === "stub") && (
+          <span
+            className="badge warn"
+            title={component.imports
+              .filter((entry) => entry.status === "stub")
+              .map((entry) => entry.specifier)
+              .join("\n")}
+          >
+            <TriangleAlert size={10} />
+            {component.imports.filter((entry) => entry.status === "stub").length} stub
+            {component.imports.filter((entry) => entry.status === "stub").length === 1 ? "" : "s"}
+          </span>
+        )}
         {component.cssOnly && (
           <span className="badge warn">
             <TriangleAlert size={10} /> css only
