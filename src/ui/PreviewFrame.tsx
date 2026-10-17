@@ -39,14 +39,23 @@ interface PreviewFrameProps {
   extraCss?: string;
   /** Report errors upward as well (detail view shows them elsewhere). */
   onErrors?(errors: PreviewError[]): void;
+  /** One-click starter props read from the component's own types. */
+  onSampleProps?(): void;
 }
 
 /**
  * A plain-language guess at what went wrong, shown under the raw error.
  * These three families cover almost every failure this playground sees.
  */
+export function wantsProps(message: string): boolean {
+  return (
+    /reading '(map|length|forEach|filter|find|slice|reduce|join|split)'/.test(message) ||
+    /Cannot convert undefined or null to object|is not iterable/.test(message)
+  );
+}
+
 export function errorHint(message: string): string | null {
-  if (/reading '(map|length|forEach|filter|find|slice|reduce|join|split)'/.test(message)) {
+  if (wantsProps(message)) {
     return "This component probably needs props — open its props editor ({} in the panel header) and provide them.";
   }
   if (/useStore must be used inside|must be used within a .*Provider|createContext/i.test(message)) {
@@ -54,9 +63,6 @@ export function errorHint(message: string): string | null {
   }
   if (/Unrecognized extension value|same instance|instanceof/i.test(message)) {
     return "A library got loaded twice with different copies of its core module — a version pin in the manifest can share one copy.";
-  }
-  if (/Cannot convert undefined or null to object|is not iterable/.test(message)) {
-    return "A value this component expects is missing — check its props.";
   }
   return null;
 }
@@ -88,6 +94,7 @@ export function PreviewFrame({
   props,
   extraCss,
   onErrors,
+  onSampleProps,
 }: PreviewFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [errors, setErrors] = useState<PreviewError[]>([]);
@@ -275,6 +282,11 @@ export function PreviewFrame({
                     <span>{err.message}</span>
                     {err.detail && <span className="faint mono">{err.detail}</span>}
                     {hint && <span className="preview-hint">{hint}</span>}
+                    {onSampleProps && wantsProps(err.message) && (
+                      <button className="btn ghost small" onClick={onSampleProps}>
+                        Create sample props
+                      </button>
+                    )}
                   </div>
                 </div>
               );

@@ -11,6 +11,8 @@ import { PreviewFrame } from "./PreviewFrame";
 import { KindBadge } from "./Badges";
 import { PropsEditor } from "./PropsEditor";
 import { dragSession } from "../core/board";
+import { componentPaths, effectiveFile } from "../core/edits";
+import { sampleProps } from "../core/propsSample";
 import type { Component } from "../core/types";
 
 interface BoardPanelProps {
@@ -49,6 +51,14 @@ export function BoardPanel({
   const props = propsById[component.id];
   const stubs = component.imports.filter((entry) => entry.status === "stub").length;
   const poster = component.screenshots[0];
+  const sourcePath = componentPaths(component)[0];
+  const sourceText = sourcePath ? effectiveFile(session, sourcePath) : "";
+  const applySampleProps = () => {
+    const sample = sampleProps(sourceText);
+    if (Object.keys(sample.props).length === 0) return;
+    setProps(component.id, sample.props);
+    setPropsOpen(true);
+  };
 
   return (
     <article
@@ -132,7 +142,11 @@ export function BoardPanel({
       </header>
 
       {propsOpen && (
-        <PropsEditor props={props} onApply={(next) => setProps(component.id, next)} />
+        <PropsEditor
+          props={props}
+          source={sourceText}
+          onApply={(next) => setProps(component.id, next)}
+        />
       )}
 
       <div className="panel-preview">
@@ -144,6 +158,7 @@ export function BoardPanel({
             reloadKey={reloadKey}
             props={props}
             className="preview-frame"
+            onSampleProps={applySampleProps}
           />
         ) : poster ? (
           <img
