@@ -102,15 +102,17 @@ export function BoardPanel({
           <Code2 size={13} />
           Edit code
         </button>
-        <button
-          className={`btn ghost small icon${propsOpen ? " active" : ""}`}
-          onClick={() => setPropsOpen((open) => !open)}
-          title="Props for this component (JSON)"
-          aria-label="Props"
-          aria-pressed={propsOpen}
-        >
-          <Braces size={13} />
-        </button>
+        {component.kind === "tsx" && (
+          <button
+            className={`btn ghost small icon${propsOpen ? " active" : ""}`}
+            onClick={() => setPropsOpen((open) => !open)}
+            title="Props for this component (JSON)"
+            aria-label="Props"
+            aria-pressed={propsOpen}
+          >
+            <Braces size={13} />
+          </button>
+        )}
         <button
           className="btn ghost small icon"
           onClick={() => setReloadKey((k) => k + 1)}
