@@ -68,7 +68,7 @@ function loaderFor(path: string): string {
  */
 export function buildEntryModule(relPath: string): string {
   return `
-import * as __hvModule from "./${relPath}";
+import * as __hvModule from ${JSON.stringify(`./${relPath}`)};
 import React from "react";
 import { createRoot } from "react-dom/client";
 
@@ -268,10 +268,34 @@ export function getBrowserEsbuild(): Promise<EsbuildLike> {
 
 const compileCache = new Map<string, CompileResult>();
 
+/**
+ * Identities of the files/assets containers act as revision markers: the
+ * store hands out a fresh Map/Set whenever their contents change (a save
+ * or a rescan), so equal identities always mean equal inputs — including
+ * the contents of local files a component imports. Content hashing here
+ * would cost more than it saves on folders with many files.
+ */
+const inputIds = new WeakMap<object, number>();
+let nextInputId = 1;
+function identityOf(value: object): number {
+  let id = inputIds.get(value);
+  if (id === undefined) {
+    id = nextInputId++;
+    inputIds.set(value, id);
+  }
+  return id;
+}
+
 /** Compile with a tiny cache so toggling the canvas does not rebuild. */
 export async function compileTsxComponentCached(input: CompileInput): Promise<CompileResult> {
   const stubKey = input.forceStub ? [...input.forceStub].sort().join("|") : "";
-  const key = `${input.path}::${input.source}::${stubKey}`;
+  const key = [
+    input.path,
+    input.source,
+    stubKey,
+    identityOf(input.files),
+    identityOf(input.assets),
+  ].join("::");
   const hit = compileCache.get(key);
   if (hit) return hit;
   const result = await compileTsxComponent(input);

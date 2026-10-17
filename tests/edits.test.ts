@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applySavedFiles,
+  carryEdits,
   componentPaths,
   dirtyPaths,
   effectiveFile,
@@ -59,6 +60,36 @@ describe("dirtyPaths", () => {
 
   it("is empty without edits", () => {
     expect(dirtyPaths(makeSession())).toEqual([]);
+  });
+});
+
+describe("carryEdits", () => {
+  it("keeps unsaved edits when rescanning the same folder", () => {
+    const session = makeSession({ edits: new Map([["a/hi.html", "<div>edited</div>"]]) });
+    const files = new Map([
+      ["a/hi.html", "<div>v1</div>"],
+      ["a/hi.css", ".x{color:red}"],
+    ]);
+    expect(carryEdits(session, "/fake", files)).toEqual(
+      new Map([["a/hi.html", "<div>edited</div>"]]),
+    );
+  });
+
+  it("drops edits for other folders, vanished files and no-op edits", () => {
+    const session = makeSession({
+      edits: new Map([
+        ["a/hi.html", "<div>edited</div>"],
+        ["gone.txt", "x"],
+        ["a/hi.css", ".x{color:red}"], // identical to the fresh disk content
+      ]),
+    });
+    const files = new Map([
+      ["a/hi.html", "<div>v1</div>"],
+      ["a/hi.css", ".x{color:red}"],
+    ]);
+    expect(carryEdits(session, "/fake", files).size).toBe(1);
+    expect(carryEdits(session, "/elsewhere", files).size).toBe(0);
+    expect(carryEdits(null, "/fake", files).size).toBe(0);
   });
 });
 

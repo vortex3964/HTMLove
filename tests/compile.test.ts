@@ -9,6 +9,7 @@ import * as nativeEsbuild from "esbuild";
 import {
   buildEntryModule,
   compileTsxComponent,
+  compileTsxComponentCached,
   type CompileInput,
   type EsbuildLike,
 } from "../src/core/compile";
@@ -176,12 +177,60 @@ describe("compileTsxComponent", () => {
   });
 });
 
+describe("compileTsxComponentCached", () => {
+  it("recompiles when a bundled local file changes", async () => {
+    const source = `import { msg } from "./util";\nexport default function X() { return <div>{msg}</div>; }`;
+    const first = await compileTsxComponentCached(
+      input({
+        source,
+        path: "cache/X.tsx",
+        files: new Map([
+          ["cache/X.tsx", source],
+          ["cache/util.ts", 'export const msg = "FIRST";'],
+        ]),
+      }),
+    );
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.code).toContain("FIRST");
+
+    /* a fresh Map means fresh contents — the cache must not serve stale code */
+    const second = await compileTsxComponentCached(
+      input({
+        source,
+        path: "cache/X.tsx",
+        files: new Map([
+          ["cache/X.tsx", source],
+          ["cache/util.ts", 'export const msg = "SECOND";'],
+        ]),
+      }),
+    );
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.code).toContain("SECOND");
+  });
+
+  it("survives file names with quotes and newlines", async () => {
+    const path = 'we"ird\nname.tsx';
+    const source = `export default function X() { return <div>ok</div>; }`;
+    const result = await compileTsxComponent(
+      input({ source, path, files: new Map([[path, source]]) }),
+    );
+    expect(result.ok).toBe(true);
+  });
+});
+
 describe("buildEntryModule", () => {
   it("imports the component by relative path from the entry", () => {
     const wrapper = buildEntryModule("carousel/car.tsx");
     expect(wrapper).toContain('from "./carousel/car.tsx"');
     expect(wrapper).toContain("createRoot");
     expect(wrapper).toContain("window.__hvProps");
+  });
+
+  it("escapes file names that would break the import statement", () => {
+    const wrapper = buildEntryModule('we"ird.tsx');
+    expect(wrapper).toContain('"./we\\"ird.tsx"');
   });
 });
 

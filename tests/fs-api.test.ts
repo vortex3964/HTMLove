@@ -39,6 +39,11 @@ describe("resolveWithin", () => {
   it("refuses absolute paths outside the root", () => {
     expect(() => resolveWithin(root, "/etc/passwd")).toThrow(HttpError);
   });
+
+  it("treats the filesystem root as a valid root", () => {
+    expect(resolveWithin("/", "etc/passwd")).toBe("/etc/passwd");
+    expect(resolveWithin("/", "")).toBe("/");
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -103,10 +108,25 @@ describe("fs API over HTTP", () => {
   let server: http.Server;
   let base: string;
 
+  const put = (body: { root: string; path: string; content: string }) =>
+    fetch(`${base}/api/fs/file`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  const scan = (root: string) =>
+    fetch(`${base}/api/fs/scan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: root }),
+    });
+
   beforeAll(async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "htmlove-api-"));
     await fs.mkdir(path.join(tmp, "sub"), { recursive: true });
     await fs.writeFile(path.join(tmp, "sub/thing.txt"), "hello");
+    await fs.writeFile(path.join(tmp, "sub/old.txt"), "old");
     await fs.writeFile(path.join(tmp, "pic.png"), Buffer.alloc(16, 1));
 
     server = http.createServer((req, res) => {
@@ -118,6 +138,8 @@ describe("fs API over HTTP", () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const { port } = server.address() as AddressInfo;
     base = `http://127.0.0.1:${port}`;
+    /* the API only serves folders that were scanned first */
+    expect((await scan(tmp)).status).toBe(200);
   });
 
   afterAll(async () => {
@@ -157,25 +179,32 @@ describe("fs API over HTTP", () => {
     expect(Object.keys(data.assets)).toEqual(["pic.png"]);
   });
 
-  it("writes a file and reads it back", async () => {
-    const res = await fetch(`${base}/api/fs/file`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ root: tmp, path: "sub/new.txt", content: "written by test" }),
-    });
+  it("writes a scanned file and reads it back", async () => {
+    const res = await put({ root: tmp, path: "sub/old.txt", content: "written by test" });
     expect(res.status).toBe(200);
-    const onDisk = await fs.readFile(path.join(tmp, "sub/new.txt"), "utf8");
+    const onDisk = await fs.readFile(path.join(tmp, "sub/old.txt"), "utf8");
     expect(onDisk).toBe("written by test");
   });
 
   it("refuses writes that escape the root", async () => {
-    const res = await fetch(`${base}/api/fs/file`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ root: tmp, path: "../escape.txt", content: "nope" }),
-    });
+    const res = await put({ root: tmp, path: "../escape.txt", content: "nope" });
     expect(res.status).toBe(400);
     await expect(fs.access(path.join(tmp, "..", "escape.txt"))).rejects.toThrow();
+  });
+
+  it("refuses writes to unknown files or non-editable types", async () => {
+    const unknown = await put({ root: tmp, path: "sub/new.txt", content: "new" });
+    expect(unknown.status).toBe(404);
+
+    const extension = await put({ root: tmp, path: "sub/evil.sh", content: "#!/bin/sh" });
+    expect(extension.status).toBe(400);
+    await expect(fs.access(path.join(tmp, "sub", "evil.sh"))).rejects.toThrow();
+  });
+
+  it("writes a root manifest even when the folder does not have one yet", async () => {
+    const res = await put({ root: tmp, path: "playground.deps.json", content: "{}" });
+    expect(res.status).toBe(200);
+    expect(await fs.readFile(path.join(tmp, "playground.deps.json"), "utf8")).toBe("{}");
   });
 
   it("streams assets with the right content type", async () => {
@@ -192,6 +221,53 @@ describe("fs API over HTTP", () => {
       `${base}/api/fs/asset?root=${encodeURIComponent(tmp)}&path=${encodeURIComponent("../../etc/passwd")}`,
     );
     expect(res.status).toBe(400);
+  });
+
+  it("only streams known, asset-typed files", async () => {
+    const textFile = await fetch(
+      `${base}/api/fs/asset?root=${encodeURIComponent(tmp)}&path=sub/thing.txt`,
+    );
+    expect(textFile.status).toBe(400);
+
+    const unknown = await fetch(
+      `${base}/api/fs/asset?root=${encodeURIComponent(tmp)}&path=missing.png`,
+    );
+    expect(unknown.status).toBe(404);
+  });
+
+  it("refuses to follow symlinks out of the scanned folder", async () => {
+    const secret = path.join(tmp, "..", `htmlove-secret-${path.basename(tmp)}.txt`);
+    await fs.writeFile(secret, "outside data");
+
+    /* a scanned text file is swapped for a symlink pointing outside */
+    await fs.rm(path.join(tmp, "sub/old.txt"));
+    await fs.symlink(secret, path.join(tmp, "sub/old.txt"));
+    const write = await put({ root: tmp, path: "sub/old.txt", content: "overwritten" });
+    expect(write.status).toBe(400);
+    expect(await fs.readFile(secret, "utf8")).toBe("outside data");
+
+    /* a scanned image is swapped the same way */
+    await fs.rm(path.join(tmp, "pic.png"));
+    await fs.symlink(secret, path.join(tmp, "pic.png"));
+    const read = await fetch(`${base}/api/fs/asset?root=${encodeURIComponent(tmp)}&path=pic.png`);
+    expect(read.status).toBe(400);
+
+    await fs.rm(secret, { force: true });
+  });
+
+  it("refuses to touch folders that were never scanned", async () => {
+    const other = await fs.mkdtemp(path.join(os.tmpdir(), "htmlove-unscanned-"));
+    await fs.writeFile(path.join(other, "pic.png"), Buffer.alloc(4, 2));
+    try {
+      const read = await fetch(
+        `${base}/api/fs/asset?root=${encodeURIComponent(other)}&path=pic.png`,
+      );
+      expect(read.status).toBe(403);
+      const write = await put({ root: other, path: "note.txt", content: "nope" });
+      expect(write.status).toBe(403);
+    } finally {
+      await fs.rm(other, { recursive: true, force: true });
+    }
   });
 
   it("falls through for non-api requests and 404s unknown api routes", async () => {

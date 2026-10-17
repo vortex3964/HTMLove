@@ -16,8 +16,8 @@ import {
   type ReactNode,
 } from "react";
 import { buildCatalog } from "../core/catalog";
-import { componentPaths, dirtyPaths } from "../core/edits";
-import { scheduleDraftSave } from "../core/drafts";
+import { carryEdits, componentPaths, dirtyPaths } from "../core/edits";
+import { scheduleDraftSave, sweepDrafts } from "../core/drafts";
 import { planImports } from "../core/deps";
 import { rewriteDeadAssets } from "../core/assets";
 import {
@@ -198,12 +198,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const snapshot = await backend.scan(root);
         const { manifest } = parseManifest(snapshot.manifestText);
         const { components } = buildCatalog(snapshot, manifest);
+        const files = new Map(Object.entries(snapshot.files));
+        /* a rescan of the same folder rescues unsaved edits that still exist */
+        const edits = carryEdits(sessionRef.current, snapshot.root, files);
         applySession({
           backendKind: "server",
           root: snapshot.root,
           label: snapshot.label,
-          files: new Map(Object.entries(snapshot.files)),
-          edits: new Map(),
+          files,
+          edits,
           assets: new Map(Object.entries(snapshot.assets)),
           skipped: snapshot.skipped ?? [],
           manifestText: snapshot.manifestText ?? null,
@@ -251,6 +254,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (didAutoRestore.current) return;
     didAutoRestore.current = true;
+    /* abandoned folders should not pile up in localStorage forever */
+    sweepDrafts();
     const last = getLastFolder();
     if (last) void loadFolder(last.root, { auto: true });
   }, [loadFolder]);

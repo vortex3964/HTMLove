@@ -116,6 +116,10 @@ export function DoctorView() {
 
   const saveDraft = () => {
     const text = manifestDraft ?? "";
+    if (text.trim() === "") {
+      setDraftError("playground.deps.json cannot be empty — use {} to clear it.");
+      return;
+    }
     const { manifest: next, error } = parseManifest(text);
     if (error) {
       setDraftError(error);

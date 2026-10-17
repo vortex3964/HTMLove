@@ -1,6 +1,6 @@
 /**
  * EditorDrawer — the code half of the dashboard. It slides in on the
- * left (pushing the board over, so the edited component stays visible)
+ * right (pushing the board over, so the edited component stays visible)
  * with one tab per file, live edits flowing straight to the panel
  * preview. Save writes every dirty file back to disk.
  */

@@ -135,6 +135,10 @@ export function PreviewFrame({
     [manifest.stubs],
   );
 
+  /* One stable Set per assets map so the compile cache only misses when the
+     folder's assets actually change (saves and rescans) — not per render. */
+  const assetSet = useMemo(() => new Set(session.assets.keys()), [session.assets]);
+
   /* ---------------- react pipeline ---------------- */
   const isReact = component.kind === "tsx" && component.tsxPath !== undefined;
   const [compiled, setCompiled] = useState<CompileResult | null>(null);
@@ -148,7 +152,7 @@ export function PreviewFrame({
       source: source.tsx,
       path: component.tsxPath,
       files: session.files,
-      assets: new Set(session.assets.keys()),
+      assets: assetSet,
       getEsbuild: getBrowserEsbuild,
       forceStub,
     })
@@ -168,7 +172,7 @@ export function PreviewFrame({
     return () => {
       cancelled = true;
     };
-  }, [isReact, source.tsx, component.tsxPath, session.files, session.assets, forceStub]);
+  }, [isReact, source.tsx, component.tsxPath, session.files, assetSet, forceStub]);
 
   const tsxDoc = useMemo(() => {
     if (!compiled || !compiled.ok) return null;

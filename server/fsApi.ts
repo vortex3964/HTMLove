@@ -2,9 +2,14 @@
  * fsApi — the tiny local file service behind htmlove.
  *
  * Exposes a deliberately small HTTP surface (scan / browse / read-write /
- * assets) restricted to folders the user explicitly picked. Every path that
- * arrives from the browser is resolved and validated against the chosen root
- * before a single byte is touched.
+ * assets). Only folders that were scanned through this server can be read
+ * from or written to, only editable text files can be saved, only known
+ * assets can be streamed, and every path is resolved through symlinks and
+ * checked against the folder before a single byte is touched.
+ *
+ * The surface is unauthenticated by design (this is a local playground,
+ * not a server), so it relies on the dev/preview server staying bound to
+ * localhost. Never expose it to a network with `--host`.
  */
 import { createReadStream, promises as fs } from "node:fs";
 import * as path from "node:path";
@@ -136,17 +141,131 @@ export function mimeFor(fileName: string): string {
   return MIME[extOf(fileName)] ?? "application/octet-stream";
 }
 
+/** True when `target` lives inside `root` (both paths already resolved). */
+export function isWithin(root: string, target: string): boolean {
+  const rel = path.relative(root, target);
+  return (
+    rel === "" ||
+    (!path.isAbsolute(rel) && rel !== ".." && !rel.startsWith(".." + path.sep))
+  );
+}
+
 /**
- * Resolve `rel` inside `root`, refusing anything that climbs out.
- * Pure and side-effect free so it is trivial to test.
+ * Resolve `rel` inside `root`, refusing anything that climbs out. Purely
+ * lexical (and therefore cheap); symlinks are caught by `assertRealWithin`
+ * before any file is touched. Pure and side-effect free so it is trivial
+ * to test. `path.relative` keeps the filesystem root ("/") usable, which a
+ * `root + path.sep` prefix check cannot.
  */
 export function resolveWithin(root: string, rel: string): string {
   const absRoot = path.resolve(root);
   const target = path.resolve(absRoot, rel);
-  if (target !== absRoot && !target.startsWith(absRoot + path.sep)) {
+  if (!isWithin(absRoot, target)) {
     throw new HttpError(400, `Path escapes the selected folder: ${rel}`);
   }
   return target;
+}
+
+/* ------------------------------------------------------------------ */
+/* scan registry — folders opened through this server                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Rel paths seen during the last scan of each canonical root. Only files
+ * in here (plus a root-level manifest) can be read or written afterwards,
+ * so a request cannot invent paths in a folder the user never opened.
+ */
+const scannedRoots = new Map<string, Set<string>>();
+const MAX_SCANNED_ROOTS = 50;
+
+/** Realpath of `root`, or null when it does not exist. */
+async function canonicalRoot(root: string): Promise<string | null> {
+  try {
+    return await fs.realpath(path.resolve(root));
+  } catch {
+    return null;
+  }
+}
+
+/** Remember everything a successful scan found in `root`. */
+async function registerScan(root: string, walk: WalkResult): Promise<void> {
+  const real = await canonicalRoot(root);
+  if (!real) return;
+  scannedRoots.set(
+    real,
+    new Set([...Object.keys(walk.files), ...Object.keys(walk.assets)]),
+  );
+  /* keep memory bounded on long-running dev servers (oldest scan first) */
+  while (scannedRoots.size > MAX_SCANNED_ROOTS) {
+    const oldest = scannedRoots.keys().next().value;
+    if (oldest === undefined) break;
+    scannedRoots.delete(oldest);
+  }
+}
+
+/** Refuse files that were not part of a scan of this exact folder. */
+async function assertScannedFile(
+  root: string,
+  rel: string,
+  opts: { allowManifest: boolean },
+): Promise<void> {
+  const real = await canonicalRoot(root);
+  const known = real ? scannedRoots.get(real) : undefined;
+  if (!known) {
+    throw new HttpError(403, "This folder was not scanned by htmlove — open it first");
+  }
+  if (!known.has(rel) && !(opts.allowManifest && rel === MANIFEST_FILE_NAME)) {
+    throw new HttpError(404, `Not part of the scanned folder: ${rel}`);
+  }
+}
+
+/**
+ * Realpath of `abs` when it may not exist yet: the deepest existing
+ * ancestor is canonicalised and the remaining segments are appended.
+ */
+async function realpathNearest(abs: string): Promise<string> {
+  let dir = path.dirname(abs);
+  const tail = [path.basename(abs)];
+  for (;;) {
+    try {
+      const realDir = await fs.realpath(dir);
+      return path.join(realDir, ...tail.reverse());
+    } catch {
+      const parent = path.dirname(dir);
+      if (parent === dir) return abs;
+      tail.push(path.basename(dir));
+      dir = parent;
+    }
+  }
+}
+
+/**
+ * Canonicalise `abs` through any symlinks and make sure it stays inside
+ * `root`. A symlink planted in the folder can therefore never be used to
+ * read or write a file elsewhere on the machine.
+ */
+async function assertRealWithin(
+  root: string,
+  abs: string,
+  opts: { mustExist: boolean },
+): Promise<void> {
+  const realRoot = await canonicalRoot(root);
+  if (!realRoot) throw new HttpError(404, `Folder not found: ${root}`);
+  let realTarget: string;
+  try {
+    realTarget = await fs.realpath(abs);
+  } catch {
+    if (opts.mustExist) throw new HttpError(404, `Not found: ${path.basename(abs)}`);
+    realTarget = await realpathNearest(abs);
+  }
+  if (!isWithin(realRoot, realTarget)) {
+    throw new HttpError(400, `Path escapes the selected folder: ${path.basename(abs)}`);
+  }
+}
+
+async function isDirectory(abs: string): Promise<boolean> {
+  const st = await fs.stat(abs).catch(() => null);
+  return st?.isDirectory() ?? false;
 }
 
 /* ------------------------------------------------------------------ */
@@ -358,6 +477,8 @@ async function handleFsRequest(
     if (!body.path) throw new HttpError(400, "Missing folder path");
     const root = path.resolve(body.path);
     const walk = await walkFolder(root);
+    /* a successful scan is what unlocks read/write for this folder */
+    await registerScan(root, walk);
     const manifestRel = Object.keys(walk.files).find(
       (rel) => rel === MANIFEST_FILE_NAME || rel.endsWith("/" + MANIFEST_FILE_NAME),
     );
@@ -378,8 +499,15 @@ async function handleFsRequest(
     const body = await readJsonBody<{ root?: string; path?: string; content?: string }>(req);
     if (!body.root || !body.path) throw new HttpError(400, "Missing root or path");
     if (typeof body.content !== "string") throw new HttpError(400, "Missing content");
+    const isManifest = body.path === MANIFEST_FILE_NAME;
+    if (!isManifest && !isEditableFile(body.path)) {
+      throw new HttpError(400, `Not an editable text file: ${body.path}`);
+    }
+    /* lexical containment first, then "was this file scanned?", then symlinks */
     const abs = resolveWithin(body.root, body.path);
-    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await assertScannedFile(body.root, body.path, { allowManifest: true });
+    await assertRealWithin(body.root, abs, { mustExist: false });
+    if (await isDirectory(abs)) throw new HttpError(400, `Not a file: ${body.path}`);
     await fs.writeFile(abs, body.content, "utf8");
     sendJson(res, 200, { ok: true, path: abs, bytes: Buffer.byteLength(body.content) });
     return;
@@ -391,7 +519,10 @@ async function handleFsRequest(
     const root = url.searchParams.get("root");
     const rel = url.searchParams.get("path");
     if (!root || !rel) throw new HttpError(400, "Missing root or path");
+    if (!isAssetFile(rel)) throw new HttpError(400, `Not a servable asset: ${rel}`);
     const abs = resolveWithin(root, rel);
+    await assertScannedFile(root, rel, { allowManifest: false });
+    await assertRealWithin(root, abs, { mustExist: true });
     const st = await fs.stat(abs).catch(() => null);
     if (!st || !st.isFile()) throw new HttpError(404, `Asset not found: ${rel}`);
     res.statusCode = 200;

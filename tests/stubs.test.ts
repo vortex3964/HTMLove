@@ -53,6 +53,16 @@ describe("generateStubModule", () => {
     expect(source).toContain("data-htmlove-stub");
     expect(source).toContain("dashed");
   });
+
+  it("skips malformed and duplicate names instead of emitting broken source", () => {
+    const source = generateStubModule("./x", [
+      { kind: "named", imported: "a; process.exitCode = 1; export const b" },
+      { kind: "named", imported: "Card" },
+      { kind: "named", imported: "Card" },
+    ]);
+    expect(source).not.toContain("process.exitCode");
+    expect(source.match(/export const Card = __hvComponent/g)?.length).toBe(1);
+  });
 });
 
 describe("generateAssetStub", () => {

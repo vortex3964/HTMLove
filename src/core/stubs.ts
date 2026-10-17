@@ -16,6 +16,9 @@ function stubKind(name: string): "component" | "hook" | "fn" {
 
 const CLASS_JOINERS = new Set(["cn", "cx", "classNames", "clsx"]);
 
+/** Only real identifiers can be emitted as `export const <name>`. */
+const VALID_EXPORT_NAME = /^[A-Za-z_$][\w$]*$/;
+
 /**
  * Build the source of a stub module that satisfies `names`.
  * Every export is function-shaped so calling or rendering it is safe.
@@ -57,11 +60,16 @@ const __hvJoinClasses = (...args) =>
   if (names.length === 0) {
     lines.push(`export default __hvComponent(${JSON.stringify(label)});`);
   } else {
+    const emitted = new Set<string>();
     for (const name of names) {
       const target = JSON.stringify(name.imported);
       /* namespace (`* as NS`) and default bindings are satisfied by the
          default export / namespace object below — nothing to emit. */
       if (name.kind === "namespace" || name.kind === "default") continue;
+      /* hand-written imports can parse into malformed or repeated names;
+         skip those instead of emitting broken (or injected) source. */
+      if (!VALID_EXPORT_NAME.test(name.imported) || emitted.has(name.imported)) continue;
+      emitted.add(name.imported);
       if (CLASS_JOINERS.has(name.imported)) {
         lines.push(`export const ${name.imported} = __hvJoinClasses;`);
         continue;

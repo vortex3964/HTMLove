@@ -21,6 +21,24 @@ export function dirtyPaths(session: Session): string[] {
   return out.sort();
 }
 
+/**
+ * Carry unsaved edits from a previous session into a fresh snapshot of the
+ * same folder (a rescan): keep an edit only when the file still exists and
+ * still differs from what is now on disk.
+ */
+export function carryEdits(
+  previous: Session | null,
+  root: string,
+  files: ReadonlyMap<string, string>,
+): Map<string, string> {
+  const carried = new Map<string, string>();
+  if (!previous || previous.root !== root) return carried;
+  for (const [path, content] of previous.edits) {
+    if (files.has(path) && content !== files.get(path)) carried.set(path, content);
+  }
+  return carried;
+}
+
 /** Fold successfully saved files into the session baseline. */
 export function applySavedFiles(session: Session, saved: Map<string, string>): Session {
   const files = new Map(session.files);

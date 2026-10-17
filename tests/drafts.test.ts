@@ -10,6 +10,7 @@ import {
   getDraft,
   saveDraft,
   scheduleDraftSave,
+  sweepDrafts,
 } from "../src/core/drafts";
 
 beforeEach(() => {
@@ -39,6 +40,23 @@ describe("draft persistence", () => {
     saveDraft("/root-b", "hi.html", "B");
     expect(getDraft("/root-a", "hi.html")).toBe("A");
     expect(getDraft("/root-b", "hi.html")).toBe("B");
+  });
+
+  it("still reads drafts written before timestamps existed", () => {
+    localStorage.setItem("htmlove:draft:/root::legacy.html", "<div>legacy</div>");
+    expect(getDraft("/root", "legacy.html")).toBe("<div>legacy</div>");
+  });
+
+  it("sweeps only drafts older than the cutoff", () => {
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    saveDraft("/root", "old.css", ".old{}");
+    vi.setSystemTime(new Date("2026-03-15T00:00:00Z"));
+    saveDraft("/root", "new.css", ".new{}");
+
+    sweepDrafts();
+
+    expect(getDraft("/root", "old.css")).toBeNull();
+    expect(getDraft("/root", "new.css")).toBe(".new{}");
   });
 });
 

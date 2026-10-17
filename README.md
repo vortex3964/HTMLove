@@ -4,7 +4,10 @@ A small local playground for HTML and React snippets.
 
 Point htmlove at any folder on your computer that has loose components in it.
 They show up in a sidebar, you click one, and it runs live on your board.
-Everything stays on your machine. No account, no cloud, no build step.
+Your files stay on your machine — no account and no build step. Previews do
+reach the network for their runtime: React and other npm packages load from
+esm.sh, Tailwind snippets load its CDN script, and "Create sample props"
+fills in placeholder images from picsum.photos.
 
 Things you can do:
 
