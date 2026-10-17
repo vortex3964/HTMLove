@@ -31,6 +31,37 @@ function jsonForScript(value: unknown): string {
     .replace(/\u2029/g, "\\u2029");
 }
 
+/**
+ * Small reviver that turns props strings into live functions inside the
+ * sandbox — `"renderItem": "(item) => item.title"` becomes callable.
+ * Only strings that really evaluate to a function are converted, and the
+ * evaluation happens in the preview iframe, never in the app shell.
+ */
+export const REVIVE_PROPS_SOURCE = `((value) => {
+  const revive = (v) => {
+    if (typeof v === "string") {
+      const text = v.trim();
+      if (text.includes("=>") || text.startsWith("function")) {
+        try {
+          const made = new Function("return (" + text + ")")();
+          if (typeof made === "function") return made;
+        } catch {
+          /* not a function expression — keep the string */
+        }
+      }
+      return v;
+    }
+    if (Array.isArray(v)) return v.map(revive);
+    if (v && typeof v === "object") {
+      const out = {};
+      for (const key of Object.keys(v)) out[key] = revive(v[key]);
+      return out;
+    }
+    return v;
+  };
+  return revive(value);
+})`;
+
 export function buildTsxPreviewDoc(options: TsxDocOptions): string {
   const {
     code,
@@ -52,7 +83,7 @@ export function buildTsxPreviewDoc(options: TsxDocOptions): string {
       : "";
   const propsTag =
     props && Object.keys(props).length > 0
-      ? `<script>window.__hvProps = ${jsonForScript(props)};</script>`
+      ? `<script>window.__hvProps = ${REVIVE_PROPS_SOURCE}(${jsonForScript(props)});</script>`
       : "";
 
   const pauseCss = paused ? "*{animation-play-state:paused !important}" : "";

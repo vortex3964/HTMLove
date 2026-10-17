@@ -49,7 +49,9 @@ export function PropsEditor({ props, onApply }: PropsEditorProps) {
             <TriangleAlert size={11} /> {error}
           </span>
         ) : (
-          <span className="faint">Props for this component — a JSON object.</span>
+          <span className="faint">
+            Props are JSON — strings like <code>(item) =&gt; item.title</code> become functions.
+          </span>
         )}
         <span className="spacer" />
         <button

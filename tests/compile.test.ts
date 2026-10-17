@@ -12,7 +12,7 @@ import {
   type CompileInput,
   type EsbuildLike,
 } from "../src/core/compile";
-import { buildTsxPreviewDoc } from "../src/core/tsxPreviewHtml";
+import { buildTsxPreviewDoc, REVIVE_PROPS_SOURCE } from "../src/core/tsxPreviewHtml";
 
 const getEsbuild = async () => nativeEsbuild as unknown as EsbuildLike;
 
@@ -227,5 +227,25 @@ describe("buildTsxPreviewDoc", () => {
     expect(doc.indexOf("__hvProps")).toBeLessThan(doc.indexOf('type="module"'));
     expect(doc).toContain("\\u003c/script");
     expect(doc).not.toContain("</script><b>");
+  });
+
+  it("revives function-looking prop strings into live functions", () => {
+    const revive = new Function(`return ${REVIVE_PROPS_SOURCE}`)() as (
+      value: unknown,
+    ) => Record<string, unknown>;
+    const out = revive({
+      renderItem: "(item, index) => item.title + index",
+      plain: "(hello)",
+      nested: { cb: "function (n) { return n * 2; }" },
+      list: ["item => item.id", 3],
+    });
+    expect(typeof out.renderItem).toBe("function");
+    const renderItem = out.renderItem as (item: { title: string }, index: number) => string;
+    expect(renderItem({ title: "a" }, 2)).toBe("a2");
+    /* prose that merely mentions => stays a string */
+    expect(out.plain).toBe("(hello)");
+    expect(typeof (out.nested as { cb: unknown }).cb).toBe("function");
+    expect(typeof (out.list as unknown[])[0]).toBe("function");
+    expect((out.list as unknown[])[1]).toBe(3);
   });
 });
