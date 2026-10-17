@@ -58,6 +58,8 @@ export interface Session {
   root: string;
   label: string;
   files: Map<string, string>;
+  /** Live unsaved edits: rel path -> content. */
+  edits: Map<string, string>;
   assets: Map<string, number>;
   skipped: Array<{ path: string; reason: string }>;
   manifestText: string | null;

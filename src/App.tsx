@@ -1,14 +1,25 @@
 /**
  * htmlove — a local playground for HTML, CSS and React component snippets.
  */
-import { FolderOpen, RefreshCw, X } from "lucide-react";
+import { FolderOpen, RefreshCw, Save, X } from "lucide-react";
 import { StoreProvider, useStore } from "./state/store";
 import { FolderPicker } from "./ui/FolderPicker";
 import { Gallery } from "./ui/Gallery";
 import { DetailView } from "./ui/DetailView";
 
 function Shell() {
-  const { session, busy, error, clearError, openPicker, rescan, view } = useStore();
+  const {
+    session,
+    busy,
+    error,
+    clearError,
+    openPicker,
+    rescan,
+    view,
+    dirty,
+    saveEdits,
+    saving,
+  } = useStore();
   const inDetail = view.mode === "detail";
 
   return (
@@ -35,6 +46,22 @@ function Shell() {
             >
               <RefreshCw size={13} />
             </button>
+          </>
+        )}
+
+        {dirty.length > 0 && (
+          <>
+            <span className="badge warn">{dirty.length} unsaved</span>
+            {!inDetail && (
+              <button
+                className="btn primary small"
+                onClick={() => void saveEdits()}
+                disabled={saving}
+              >
+                <Save size={13} />
+                {saving ? "Saving…" : "Save"}
+              </button>
+            )}
           </>
         )}
 

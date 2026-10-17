@@ -1,7 +1,7 @@
 /**
- * App-wide state: the current folder session, the active view (gallery or
- * a component's detail), shared preview preferences and errors.
- * Deliberately a plain React context — no external state library needed.
+ * App-wide state: the current folder session, live edits, the active view
+ * (gallery or a component's detail) shared preview preferences and
+ * errors. Deliberately a plain React context — no external state library.
  */
 import {
   createContext,
@@ -12,6 +12,8 @@ import {
   type ReactNode,
 } from "react";
 import { buildCatalog } from "../core/catalog";
+import { applySavedFiles, dirtyPaths } from "../core/edits";
+import { scheduleDraftSave } from "../core/drafts";
 import {
   addRecent,
   getPrefs,
@@ -43,6 +45,15 @@ export interface StoreShape {
 
   prefs: Prefs;
   setPrefs(patch: Partial<Prefs>): void;
+
+  /** Live editing. */
+  setEdit(path: string, content: string): void;
+  discardEdits(paths?: string[]): void;
+  saveEdits(): Promise<void>;
+  saving: boolean;
+  lastSavedAt: number | null;
+  /** Paths with unsaved changes (derived). */
+  dirty: string[];
 }
 
 const StoreContext = createContext<StoreShape | null>(null);
@@ -51,6 +62,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const backend = serverBackend;
   const [session, setSession] = useState<Session | null>(null);
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [view, setView] = useState<ViewState>({ mode: "gallery" });
@@ -76,6 +89,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           root: snapshot.root,
           label: snapshot.label,
           files: new Map(Object.entries(snapshot.files)),
+          edits: new Map(),
           assets: new Map(Object.entries(snapshot.assets)),
           skipped: snapshot.skipped ?? [],
           manifestText: snapshot.manifestText ?? null,
@@ -99,11 +113,64 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const openPicker = useCallback(() => setPickerOpen(true), []);
   const closePicker = useCallback(() => setPickerOpen(false), []);
   const clearError = useCallback(() => setError(null), []);
-  const openComponent = useCallback(
-    (id: string) => setView({ mode: "detail", id }),
-    [],
-  );
+  const openComponent = useCallback((id: string) => setView({ mode: "detail", id }), []);
   const backToGallery = useCallback(() => setView({ mode: "gallery" }), []);
+
+  /* ------------------------------------------------------------ */
+  /* live editing                                                  */
+  /* ------------------------------------------------------------ */
+
+  const setEdit = useCallback(
+    (path: string, content: string) => {
+      if (!session) return;
+      const baseline = session.files.get(path) ?? "";
+      const edits = new Map(session.edits);
+      const isBaseline = content === baseline;
+      if (isBaseline) edits.delete(path);
+      else edits.set(path, content);
+      setSession({ ...session, edits });
+      scheduleDraftSave(session.root, path, content, isBaseline);
+    },
+    [session],
+  );
+
+  const discardEdits = useCallback(
+    (paths?: string[]) => {
+      if (!session) return;
+      const edits = new Map(session.edits);
+      const targets = paths ?? [...edits.keys()];
+      for (const path of targets) {
+        edits.delete(path);
+        scheduleDraftSave(session.root, path, "", true);
+      }
+      setSession({ ...session, edits });
+    },
+    [session],
+  );
+
+  const saveEdits = useCallback(async () => {
+    if (!session) return;
+    const dirty = dirtyPaths(session);
+    if (dirty.length === 0) return;
+    setSaving(true);
+    try {
+      const saved = new Map<string, string>();
+      for (const path of dirty) {
+        const content = session.edits.get(path) ?? "";
+        await backend.writeFile(session.root, path, content);
+        saved.set(path, content);
+        scheduleDraftSave(session.root, path, "", true);
+      }
+      setSession(applySavedFiles(session, saved));
+      setLastSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }, [session, backend]);
+
+  const dirty = useMemo(() => (session ? dirtyPaths(session) : []), [session]);
 
   const value = useMemo<StoreShape>(
     () => ({
@@ -122,6 +189,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       backToGallery,
       prefs,
       setPrefs,
+      setEdit,
+      discardEdits,
+      saveEdits,
+      saving,
+      lastSavedAt,
+      dirty,
     }),
     [
       backend,
@@ -139,6 +212,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       backToGallery,
       prefs,
       setPrefs,
+      setEdit,
+      discardEdits,
+      saveEdits,
+      saving,
+      lastSavedAt,
+      dirty,
     ],
   );
 

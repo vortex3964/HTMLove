@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { TriangleAlert } from "lucide-react";
 import { buildPreviewDoc, PREVIEW_READY_CHANNEL } from "../core/previewHtml";
 import { splitTxtSource } from "../core/catalog";
+import { effectiveFile } from "../core/edits";
 import { useStore } from "../state/store";
 import type { Component, Session } from "../core/types";
 
@@ -38,13 +39,12 @@ export function resolvePreviewSource(
   component: Component,
   session: Session,
 ): { html: string; css: string } {
-  const files = session.files;
   if (component.kind === "txt" && component.txtPath) {
-    const raw = files.get(component.txtPath) ?? "";
+    const raw = effectiveFile(session, component.txtPath);
     return splitTxtSource(raw);
   }
-  const html = component.htmlPath ? (files.get(component.htmlPath) ?? "") : "";
-  const css = component.cssPath ? (files.get(component.cssPath) ?? "") : "";
+  const html = effectiveFile(session, component.htmlPath);
+  const css = effectiveFile(session, component.cssPath);
   return { html, css };
 }
 

@@ -807,7 +807,7 @@ body {
   white-space: nowrap;
 }
 
-/* ---------- detail view ---------- */
+/* ---------- detail view / playground ---------- */
 
 .detail {
   display: flex;
@@ -819,11 +819,12 @@ body {
 .detail-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
   flex: 0 0 auto;
+  flex-wrap: wrap;
 }
 
 .detail-name {
@@ -831,25 +832,126 @@ body {
   font-size: 14px;
 }
 
-.detail-stage {
+.detail-body {
   flex: 1;
   min-height: 0;
   display: flex;
-  justify-content: center;
+}
+
+.detail-code {
+  width: 46%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.code-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  padding: 7px 9px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  position: relative;
+}
+
+.code-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 13px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px 7px 0 0;
+  cursor: pointer;
+  position: relative;
+}
+
+.code-tab:hover {
+  color: var(--text);
+}
+
+.code-tab.active {
+  background: var(--panel);
+  border-color: var(--border);
+  border-bottom-color: var(--panel);
+  color: var(--text);
+  margin-bottom: -1px;
+}
+
+.dirty-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  display: inline-block;
+}
+
+.editor-host {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor-host .cm-editor {
+  height: 100%;
+}
+
+.code-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  background: var(--panel-2);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.code-foot-dirty {
+  color: var(--warn);
+}
+
+.detail-preview {
+  flex: 1;
+  min-width: 0;
   padding: 16px;
   background: #ececef;
+  display: flex;
+  justify-content: center;
   overflow: auto;
 }
 
 .detail-frame {
   width: 100%;
   max-width: 1280px;
-  min-height: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
   box-shadow: var(--shadow-sm);
   background: #fff;
+  position: relative;
+  height: 100%;
+}
+
+@media (max-width: 980px) {
+  .detail-body {
+    flex-direction: column;
+  }
+
+  .detail-code {
+    width: 100%;
+    height: 46%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
 }
 
 
