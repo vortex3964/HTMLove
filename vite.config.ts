@@ -1,8 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { fsApiPlugin } from "./server/plugin.ts";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), fsApiPlugin()],
   server: {
     port: 5199,
     strictPort: false,

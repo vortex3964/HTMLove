@@ -1,10 +1,14 @@
 /**
  * htmlove — a local playground for HTML, CSS and React component snippets.
- *
- * The shell is intentionally thin for now: the topbar and the empty state.
- * The folder picker, gallery and playground land in the next milestones.
  */
-export default function App() {
+import { FolderOpen, RefreshCw, X } from "lucide-react";
+import { StoreProvider, useStore } from "./state/store";
+import { FolderPicker } from "./ui/FolderPicker";
+import { ComponentList } from "./ui/ComponentList";
+
+function Shell() {
+  const { session, busy, error, clearError, openPicker, rescan } = useStore();
+
   return (
     <div className="app">
       <header className="topbar">
@@ -13,26 +17,80 @@ export default function App() {
         </span>
         <span className="tagline">local component playground</span>
         <span className="spacer" />
+
+        {session && (
+          <>
+            <span className="badge">{session.catalog.length} components</span>
+            <span className="root-chip" title={session.root}>
+              <FolderOpen size={13} />
+              <span className="path">{session.root}</span>
+            </span>
+            <button className="btn ghost small" onClick={() => void rescan()} disabled={busy} title="Scan again">
+              <RefreshCw size={13} />
+            </button>
+          </>
+        )}
+
+        <button className="btn primary" onClick={openPicker} disabled={busy}>
+          <FolderOpen size={14} />
+          {session ? "Change folder" : "Choose folder"}
+        </button>
       </header>
-      <main className="main">
-        <div className="centered">
-          <section className="card empty">
-            <h1>Point htmlove at a folder</h1>
-            <p>
-              htmlove turns any folder of loose snippets into a live playground. Pick a
-              folder containing your HTML, CSS and React components and it will:
-            </p>
-            <ul>
-              <li>catalog every component it finds (pairs like <code>hi.html</code> + <code>hi.css</code>, standalone HTML, <code>.tsx</code> files and mixed <code>.txt</code> snippets)</li>
-              <li>render them all in a gallery, each one live and isolated</li>
-              <li>let you edit any of them and save changes straight back to disk</li>
-            </ul>
-            <p className="faint" style={{ fontSize: 12 }}>
-              The folder picker arrives with the next milestone.
-            </p>
-          </section>
+
+      {error && (
+        <div className="error-banner">
+          <span>{error}</span>
+          <button className="btn ghost small" onClick={clearError} aria-label="Dismiss">
+            <X size={13} />
+          </button>
         </div>
+      )}
+
+      <main className="main">
+        {busy ? (
+          <div className="centered">
+            <div className="scanning">
+              <span className="spinner-ring" />
+              <span>Scanning folder…</span>
+            </div>
+          </div>
+        ) : session ? (
+          <ComponentList />
+        ) : (
+          <div className="centered">
+            <section className="card empty">
+              <h1>Point htmlove at a folder</h1>
+              <p>
+                htmlove turns any folder of loose snippets into a live playground. Pick a
+                folder containing your HTML, CSS and React components and it will:
+              </p>
+              <ul>
+                <li>
+                  catalog every component it finds (pairs like <code>hi.html</code> +{" "}
+                  <code>hi.css</code>, standalone HTML, <code>.tsx</code> files and mixed{" "}
+                  <code>.txt</code> snippets)
+                </li>
+                <li>render them all in a gallery, each one live and isolated</li>
+                <li>let you edit any of them and save changes straight back to disk</li>
+              </ul>
+              <button className="btn primary" onClick={openPicker}>
+                <FolderOpen size={14} />
+                Choose folder
+              </button>
+            </section>
+          </div>
+        )}
       </main>
+
+      <FolderPicker />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <StoreProvider>
+      <Shell />
+    </StoreProvider>
   );
 }
