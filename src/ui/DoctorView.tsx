@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import { Activity, ArrowLeft, Wrench } from "lucide-react";
 import { useStore } from "../state/store";
 import { KindBadge } from "./Badges";
+import { toast } from "./Toasts";
 import { esmUrl } from "../core/packages";
 import { probeAssetUrl, type ProbeStatus } from "../core/assets";
 import { parseManifest } from "../core/manifest";
@@ -38,8 +39,8 @@ function shortUrl(url: string): string {
 export function DoctorView() {
   const {
     session,
-    backToGallery,
-    openComponent,
+    showBoard,
+    openOnBoard,
     manifest,
     manifestError,
     saveManifest,
@@ -50,7 +51,6 @@ export function DoctorView() {
   const [onlyProblems, setOnlyProblems] = useState(false);
   const [manifestDraft, setManifestDraft] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
-  const [fixNote, setFixNote] = useState<string | null>(null);
 
   const components = session?.catalog ?? [];
 
@@ -122,15 +122,20 @@ export function DoctorView() {
       return;
     }
     setDraftError(null);
-    void saveManifest(next).then(() => setManifestDraft(null));
+    void saveManifest(next).then((ok) => {
+      if (ok) {
+        setManifestDraft(null);
+        toast("playground.deps.json saved");
+      }
+    });
   };
 
   return (
     <div className="doctor">
       <div className="detail-bar">
-        <button className="btn ghost small" onClick={backToGallery}>
+        <button className="btn ghost small" onClick={showBoard}>
           <ArrowLeft size={14} />
-          Gallery
+          Board
         </button>
         <span className="detail-name">Dependency doctor</span>
         <span className="badge">{components.length} components</span>
@@ -155,15 +160,6 @@ export function DoctorView() {
         </button>
       </div>
 
-      {fixNote && (
-        <div className="doctor-note">
-          <span>{fixNote}</span>
-          <button className="btn ghost small" onClick={() => setFixNote(null)}>
-            Dismiss
-          </button>
-        </div>
-      )}
-
       <div className="doctor-body">
         {shown.length === 0 ? (
           <div className="gallery-empty faint">
@@ -187,8 +183,8 @@ export function DoctorView() {
                     <td className="doctor-name-cell">
                       <button
                         className="doctor-name"
-                        onClick={() => openComponent(component.id)}
-                        title="Open in the playground"
+                        onClick={() => openOnBoard(component.id)}
+                        title="Open on the board, with its code beside it"
                       >
                         {component.name}
                       </button>
@@ -261,12 +257,13 @@ export function DoctorView() {
                           title="Replace the dead URLs in this component's files (as editable changes)"
                           onClick={() => {
                             const patched = applyAssetFix(component.id, failing);
-                            setFixNote(
+                            toast(
                               patched > 0
                                 ? `${component.name}: replaced ${failing.length} dead URL${
                                     failing.length === 1 ? "" : "s"
                                   } in ${patched} file${patched === 1 ? "" : "s"} — review, then Save.`
                                 : `${component.name}: nothing to replace.`,
+                              patched > 0 ? "ok" : "warn",
                             );
                           }}
                         >

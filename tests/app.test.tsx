@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 /**
  * App-level integration test with a mocked file API: renders the real
- * App and walks the main journey — choose a folder, land in the live
- * gallery, open the dependency doctor and come back. This is about
- * state flowing between the API client, the store and the views; the
- * heavy pieces (editors, iframes, wasm) have their own tests.
+ * App and walks the dashboard journey — pick a folder, land on the
+ * board, pull a component in, open its code drawer and come back; plus
+ * the folder-memory fallbacks. The heavy pieces (editors, iframes,
+ * wasm) have their own tests.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
@@ -60,7 +60,8 @@ function mockFetch() {
     if (url === "/api/fs/scan") {
       const body = JSON.parse(String(init?.body ?? "{}")) as { path: string };
       scanned.push(body.path);
-      return jsonResponse(SNAPSHOT);
+      if (body.path === SNAPSHOT.root) return jsonResponse(SNAPSHOT);
+      return jsonResponse({ error: `no folder at ${body.path}` }, 404);
     }
     if (url === "/api/fs/file") return jsonResponse({ ok: true });
     return jsonResponse({ error: `unmocked ${url}` }, 404);
@@ -84,9 +85,26 @@ function button(text: string): HTMLButtonElement {
   return found as HTMLButtonElement;
 }
 
-async function click(target: HTMLButtonElement) {
+/** Sidebar rows are li[role=button], not real buttons. */
+function row(text: string): HTMLElement {
+  const found = [...document.querySelectorAll<HTMLElement>("li[role='button']")].find((el) =>
+    (el.textContent ?? "").includes(text),
+  );
+  if (!found) throw new Error(`no sidebar row containing "${text}"`);
+  return found;
+}
+
+async function click(target: HTMLElement) {
   await act(async () => {
     target.click();
+  });
+  await settle();
+}
+
+async function mountApp() {
+  root = createRoot(container);
+  await act(async () => {
+    root.render(createElement(App));
   });
   await settle();
 }
@@ -121,7 +139,7 @@ describe("the htmlove app", () => {
     expect(container.textContent).toContain("Choose folder");
   });
 
-  it("walks from picking a folder to the live gallery", async () => {
+  it("walks from picking a folder to the dashboard", async () => {
     await click(button("Choose folder"));
 
     /* the picker opened, fetched home and listed its contents */
@@ -134,13 +152,34 @@ describe("the htmlove app", () => {
     await click(button("Use this folder"));
 
     expect(scanned).toEqual(["/fake/home/components"]);
-    expect(container.textContent).toContain("2 components");
+    expect(container.querySelector(".sidebar")).toBeTruthy();
     expect(container.textContent).toContain("Alpha");
     expect(container.textContent).toContain("beta");
     expect(container.textContent).toContain("/fake/home/components");
+    expect(container.textContent).toContain("Your board is empty");
   });
 
-  it("opens the dependency doctor and comes back to the gallery", async () => {
+  it("pulls a component onto the board and opens its code drawer", async () => {
+    await loadFixtureFolder();
+
+    await click(row("Alpha"));
+    expect(container.querySelectorAll(".panel")).toHaveLength(1);
+    /* the preview iframe is mounted inside the panel */
+    expect(container.querySelector(".panel iframe")).toBeTruthy();
+
+    await click(button("Edit code"));
+    const drawer = container.querySelector(".drawer");
+    expect(drawer).toBeTruthy();
+    expect(drawer?.textContent).toContain("alpha.html");
+
+    await click(container.querySelector<HTMLElement>('[aria-label="Close the editor"]')!);
+    expect(container.querySelector(".drawer")).toBeNull();
+    expect(container.querySelector(".sidebar")).toBeTruthy();
+    /* the panel stayed put while the drawer was open */
+    expect(container.querySelectorAll(".panel")).toHaveLength(1);
+  });
+
+  it("opens the dependency doctor and comes back to the board", async () => {
     await loadFixtureFolder();
 
     await click(button("Doctor"));
@@ -152,8 +191,32 @@ describe("the htmlove app", () => {
     /* no tsx in this folder: imports column is honest about it */
     expect(container.textContent).toContain("only problems");
 
-    await click(button("Gallery"));
-    expect(container.querySelector(".gallery-grid")).toBeTruthy();
+    await click(button("Board"));
+    expect(container.querySelector(".board")).toBeTruthy();
     expect(container.textContent).not.toContain("Dependency doctor");
+  });
+
+  it("reopens the folder from last time — and falls back when it is gone", async () => {
+    /* relaunch with a remembered folder: no picker, straight in */
+    await act(async () => root.unmount());
+    localStorage.setItem(
+      "htmlove:last-folder",
+      JSON.stringify({ root: "/fake/home/components", label: "components" }),
+    );
+    await mountApp();
+    expect(scanned).toEqual(["/fake/home/components"]);
+    expect(container.querySelector(".sidebar")).toBeTruthy();
+
+    /* relaunch where the folder moved away: notice + picker + memory cleared */
+    await act(async () => root.unmount());
+    localStorage.setItem(
+      "htmlove:last-folder",
+      JSON.stringify({ root: "/moved/away", label: "away" }),
+    );
+    await mountApp();
+    expect(scanned).toEqual(["/fake/home/components", "/moved/away"]);
+    expect(container.textContent).toContain("Couldn't reopen your last folder");
+    expect(document.querySelector(".modal")).toBeTruthy();
+    expect(localStorage.getItem("htmlove:last-folder")).toBeNull();
   });
 });
