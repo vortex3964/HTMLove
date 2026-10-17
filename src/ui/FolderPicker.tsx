@@ -5,11 +5,11 @@
  * a path straight in. Recent folders are remembered between visits.
  */
 import { useCallback, useEffect, useState } from "react";
-import { ArrowUp, CornerDownLeft, Folder, FolderOpen, Home } from "lucide-react";
+import { ArrowUp, CornerDownLeft, Folder, FolderOpen, Home, X } from "lucide-react";
 import { Modal } from "./Modal";
 import { useStore } from "../state/store";
 import { serverBackend } from "../backends/server";
-import { getRecents, type RecentFolder } from "../core/persist";
+import { getRecents, removeRecent, type RecentFolder } from "../core/persist";
 import type { BrowseResult } from "../backends/types";
 
 export function FolderPicker() {
@@ -60,11 +60,24 @@ export function FolderPicker() {
           <h3>Recent folders</h3>
           <div className="picker-recents">
             {recents.map((r) => (
-              <button key={r.root} className="picker-recent" onClick={() => pick(r.root)}>
-                <FolderOpen size={15} />
-                <span className="picker-recent-label">{r.label}</span>
-                <span className="picker-recent-path mono faint">{r.root}</span>
-              </button>
+              <div key={r.root} className="picker-recent-row">
+                <button className="picker-recent" onClick={() => pick(r.root)}>
+                  <FolderOpen size={15} />
+                  <span className="picker-recent-label">{r.label}</span>
+                  <span className="picker-recent-path mono faint">{r.root}</span>
+                </button>
+                <button
+                  className="btn ghost small icon"
+                  title="Forget this folder"
+                  aria-label={`Forget ${r.label}`}
+                  onClick={() => {
+                    removeRecent(r.root);
+                    setRecents(getRecents());
+                  }}
+                >
+                  <X size={12} />
+                </button>
+              </div>
             ))}
           </div>
         </section>
