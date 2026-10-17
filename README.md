@@ -28,9 +28,14 @@ choose, and everything else happens in your browser.
   usual suspects (missing props, a missing provider, a library loaded twice).
 - **Props, right where they are needed.** Components that take props get a small
   JSON editor behind the `{}` button in the panel header; it applies as you type
-  and tells you when the JSON is off.
+  and tells you when the JSON is off. When a component fails because it is
+  missing props, **Create sample props** writes starter JSON read from the
+  component's own TypeScript types (arrays of local interfaces, literal unions,
+  functions), so drag lists and carousels run with one click. Strings that read
+  like functions — `"(item, index) => item.title"` — become real functions in the
+  sandbox, which is how render-prop components are fed.
 - **Edit beside the board.** Every file of a component opens in a drawer on the
-  left (CodeMirror) that pushes the board over, so the edited panel stays visible.
+  right (CodeMirror) that pushes the board over, so the edited panel stays visible.
   Typing re-renders the preview shortly after you pause. Drafts are kept in
   localStorage, **Save** (or `Ctrl/Cmd+S`) writes back to the original files,
   **Reset** returns to the last on-disk version. `Esc` closes the drawer, `/`
