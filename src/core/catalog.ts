@@ -11,6 +11,7 @@
 import type { CatalogResult, Component, RawSnapshot } from "./types";
 import { planImports, type ManifestLike } from "./deps";
 import { extractRemoteAssets } from "./assets";
+import { collectImportedFiles } from "./imports";
 
 /* ------------------------------------------------------------------ */
 /* path helpers                                                        */
@@ -144,6 +145,11 @@ export function buildCatalog(snapshot: RawSnapshot, manifest?: ManifestLike): Ca
   const fileKeys = new Set(Object.keys(files));
   const assetKeys = new Set(Object.keys(assets));
 
+  /* React sources someone else imports are that component's dependencies
+     (sub-components, vendored helpers) — previews still bundle them, but
+     they are not gallery entries of their own. */
+  const importedByOthers = collectImportedFiles(files);
+
   /* group all files by the folder they live in */
   const byDir = new Map<string, string[]>();
   for (const rel of Object.keys(files).sort()) {
@@ -193,6 +199,7 @@ export function buildCatalog(snapshot: RawSnapshot, manifest?: ManifestLike): Ca
       });
     }
     for (const rel of reactSources) {
+      if (importedByOthers.has(rel)) continue;
       candidates.push({ kind: "tsx", primary: rel, tsxPath: rel });
     }
     for (const rel of txts) {

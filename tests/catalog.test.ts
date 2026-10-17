@@ -212,6 +212,33 @@ describe("buildCatalog", () => {
     });
   });
 
+  it("shows entries, not the files they import", () => {
+    /* vendoring a component's helpers must not clone every helper into the
+       gallery — the folder now reads as one entry again. */
+    const snapshot: RawSnapshot = {
+      root: "/fake/components",
+      label: "components",
+      files: {
+        "carousel/car.tsx":
+          'import { Card } from "./card";\nexport default function Car() { return <Card />; }',
+        "carousel/card.tsx": "export const Card = () => null;",
+        "date-picker/date.tsx":
+          'import { Picker } from "@/components/date-picker/date-picker";\nexport default Picker;',
+        "date-picker/components/date-picker/date-picker.tsx":
+          "export const Picker = () => null;",
+      },
+      assets: {},
+      skipped: [],
+      manifestText: null,
+    };
+    const { components } = buildCatalog(snapshot);
+    expect(components.map((c) => c.name).sort()).toEqual(["carousel", "date-picker"]);
+    expect(components.map((c) => c.tsxPath).sort()).toEqual([
+      "carousel/car.tsx",
+      "date-picker/date.tsx",
+    ]);
+  });
+
   it("sorts components by name", () => {
     const names = components.map((c) => c.name);
     expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));

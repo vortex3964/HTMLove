@@ -213,6 +213,47 @@ const PROBE_EXTENSIONS = [
 ];
 
 /**
+ * The folder a file's `@/` alias is rooted at: the snippet folder the
+ * file lives in (its top-level segment under the scan root). A file at
+ * `carousel/components/ui/button.tsx` treats `carousel/` as its project
+ * root, because a folder of snippets is a folder of little projects.
+ * Files at the scan root keep the root itself.
+ */
+export function aliasBaseOf(fromDir: string): string {
+  const cut = fromDir.indexOf("/");
+  return cut === -1 ? fromDir : fromDir.slice(0, cut);
+}
+
+/**
+ * The local paths (no extension) a specifier could point at, best
+ * first. `@/` imports prefer the file's own snippet folder and fall back
+ * to the scan root, so both a snippet collection and a single project
+ * folder resolve, whichever layout the files actually use.
+ */
+export function localBasesFor(specifier: string, fromDir: string): string[] | null {
+  if (specifier.startsWith("@/")) {
+    const rest = specifier.slice(2);
+    if (rest.startsWith("..")) return null;
+    const snippet = aliasBaseOf(fromDir);
+    const bases: string[] = [];
+    if (snippet) bases.push(joinPaths(snippet, rest));
+    bases.push(rest);
+    return bases;
+  }
+  if (specifier.startsWith("./") || specifier.startsWith("../")) {
+    return [joinPaths(fromDir, specifier)];
+  }
+  if (specifier.startsWith("/")) return [specifier.slice(1)];
+  return null;
+}
+
+function probeBase(base: string, known: Set<string>): string | null {
+  const candidates = PROBE_EXTENSIONS.map((ext) => base + ext);
+  for (const ext of PROBE_EXTENSIONS.slice(1)) candidates.push(`${base}/index${ext}`);
+  return candidates.find((candidate) => known.has(candidate)) ?? null;
+}
+
+/**
  * Map a relative or `@/` import to a real file inside the scanned
  * folder, probing common extensions and index files. Returns null when
  * the file simply is not there.
@@ -222,13 +263,32 @@ export function resolveLocalCandidate(
   importer: string,
   known: Set<string>,
 ): string | null {
-  let base: string | null = null;
-  if (spec.startsWith("@/")) base = spec.slice(2);
-  else if (spec.startsWith("./") || spec.startsWith("../")) base = joinPaths(dirnameOf(importer), spec);
-  else if (spec.startsWith("/")) base = spec.slice(1);
-  if (base === null || base.startsWith("..")) return null;
+  const bases = localBasesFor(spec, dirnameOf(importer));
+  if (bases === null) return null;
+  for (const base of bases) {
+    if (base === "" || base.startsWith("..")) continue;
+    const hit = probeBase(base, known);
+    if (hit) return hit;
+  }
+  return null;
+}
 
-  const candidates = PROBE_EXTENSIONS.map((ext) => base + ext);
-  for (const ext of PROBE_EXTENSIONS.slice(1)) candidates.push(`${base}/index${ext}`);
-  return candidates.find((candidate) => known.has(candidate)) ?? null;
+/**
+ * Every path in `files` that some file imports locally. Those are the
+ * dependencies of a component (sub-components, vendored helpers), so the
+ * catalog never shows them as gallery entries of their own. Uses the
+ * same resolution as the compiler, so what previews load is what counts
+ * as a dependency here.
+ */
+export function collectImportedFiles(files: Readonly<Record<string, string>>): Set<string> {
+  const known = new Set(Object.keys(files));
+  const imported = new Set<string>();
+  for (const [rel, text] of Object.entries(files)) {
+    if (!text) continue;
+    for (const ref of parseImports(text)) {
+      const resolved = resolveLocalCandidate(ref.specifier, rel, known);
+      if (resolved !== null && resolved !== rel) imported.add(resolved);
+    }
+  }
+  return imported;
 }

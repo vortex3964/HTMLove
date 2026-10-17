@@ -4,14 +4,14 @@
  * respond, and one-click repairs (dead assets, custom import URLs).
  */
 import { useMemo, useState } from "react";
-import { Activity, ArrowLeft, Wrench } from "lucide-react";
+import { Activity, ArrowLeft, PackagePlus, Wrench } from "lucide-react";
 import { useStore } from "../state/store";
 import { KindBadge } from "./Badges";
 import { toast } from "./Toasts";
 import { esmUrl } from "../core/packages";
 import { probeAssetUrl, type ProbeStatus } from "../core/assets";
 import { parseManifest } from "../core/manifest";
-import type { Component } from "../core/types";
+import type { Component, ResolveReport } from "../core/types";
 import type { PlanEntry } from "../core/deps";
 
 type ProbeState = ProbeStatus | "pending";
@@ -20,6 +20,7 @@ const NEW_MANIFEST = `{
   "packages": {},
   "urls": {},
   "stubs": [],
+  "resolve": {},
   "tokens": {}
 }
 `;
@@ -36,6 +37,24 @@ function shortUrl(url: string): string {
   return bare.length > 38 ? `${bare.slice(0, 36)}…` : bare;
 }
 
+/** One-line summary of a Resolve run, as a toast. */
+function resolveToast(label: string, report: ResolveReport | null): void {
+  if (!report) return;
+  const parts = [
+    `fetched ${report.written.length} file${report.written.length === 1 ? "" : "s"}`,
+  ];
+  if (report.unresolved.length > 0) {
+    parts.push(
+      `${report.unresolved.length} import${report.unresolved.length === 1 ? "" : "s"} still unresolved`,
+    );
+  }
+  if (report.skipped.length > 0) parts.push(`${report.skipped.length} kept as-is`);
+  toast(
+    `${label}: ${parts.join(" · ")}`,
+    report.unresolved.length > 0 || report.written.length === 0 ? "warn" : "ok",
+  );
+}
+
 export function DoctorView() {
   const {
     session,
@@ -46,6 +65,9 @@ export function DoctorView() {
     saveManifest,
     saving,
     applyAssetFix,
+    resolving,
+    resolveComponent,
+    resolveAll,
   } = useStore();
   const [probes, setProbes] = useState<Map<string, ProbeState>>(new Map());
   const [onlyProblems, setOnlyProblems] = useState(false);
@@ -162,6 +184,19 @@ export function DoctorView() {
           <Activity size={13} />
           Probe all
         </button>
+        {counts.stubs > 0 && (
+          <button
+            className="btn ghost small"
+            disabled={resolving}
+            title="Fetch the files behind every stubbed import (resolve rules in playground.deps.json + built-in registry presets)"
+            onClick={() => {
+              void resolveAll().then((report) => resolveToast("all components", report));
+            }}
+          >
+            <PackagePlus size={13} />
+            {resolving ? "Resolving…" : `Resolve all (${counts.stubs})`}
+          </button>
+        )}
       </div>
 
       <div className="doctor-body">
@@ -182,6 +217,7 @@ export function DoctorView() {
             <tbody>
               {shown.map((component) => {
                 const failing = failingAssets(component);
+                const stubs = component.imports.filter((entry) => entry.status === "stub").length;
                 return (
                   <tr key={component.id}>
                     <td className="doctor-name-cell">
@@ -255,6 +291,21 @@ export function DoctorView() {
                       )}
                     </td>
                     <td className="doctor-actions">
+                      {stubs > 0 && (
+                        <button
+                          className="btn ghost small"
+                          disabled={resolving}
+                          title="Fetch the missing files from the source given by playground.deps.json (or built-in registry presets), then rescan"
+                          onClick={() => {
+                            void resolveComponent(component.id).then((report) =>
+                              resolveToast(component.name, report),
+                            );
+                          }}
+                        >
+                          <PackagePlus size={12} />
+                          Resolve {stubs}
+                        </button>
+                      )}
                       {failing.length > 0 && (
                         <button
                           className="btn ghost small"
@@ -296,8 +347,11 @@ export function DoctorView() {
           </summary>
           {manifestError && <p className="faint panel-note">{manifestError}</p>}
           <p className="faint panel-note">
-            Version pins, custom URLs, forced stubs and design tokens for this folder. Saving
-            writes the file next to your components.
+            Version pins, custom URLs, forced stubs and design tokens for this folder. The{" "}
+            <span className="mono">resolve</span> map points the Resolve button at fetchable
+            sources (<span className="mono">gh:owner/repo/path</span>, <span className="mono">registry:</span>,{" "}
+            <span className="mono">url:</span>, <span className="mono">builtin:cn</span>). Saving
+            writes this file next to your components.
           </p>
           <textarea
             className="manifest-text mono"

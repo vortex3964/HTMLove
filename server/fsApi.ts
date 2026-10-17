@@ -15,6 +15,8 @@ import { createReadStream, promises as fs } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { resolveImports, type ResolveRequest } from "./resolveImports.ts";
+import { readEnvFolder, writeEnvFolder } from "./envFile.ts";
 
 /* ------------------------------------------------------------------ */
 /* constants                                                           */
@@ -219,6 +221,14 @@ async function assertScannedFile(
   }
 }
 
+/** Refuse to touch a folder the user never opened through a scan. */
+async function assertScannedRoot(root: string): Promise<void> {
+  const real = await canonicalRoot(root);
+  if (!real || !scannedRoots.has(real)) {
+    throw new HttpError(403, "This folder was not scanned by htmlove — open it first");
+  }
+}
+
 /**
  * Realpath of `abs` when it may not exist yet: the deepest existing
  * ancestor is canonicalised and the remaining segments are appended.
@@ -410,6 +420,11 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
 
 export const MANIFEST_FILE_NAME = "playground.deps.json";
 
+export interface FsApiOptions {
+  /** Where the default folder is remembered (tests point this at a temp file). */
+  envFile?: string;
+}
+
 /**
  * Connect-style middleware for everything under /api/fs/.
  * Requests outside that prefix fall through to `next`.
@@ -418,13 +433,14 @@ export function fsApiMiddleware(
   req: IncomingMessage,
   res: ServerResponse,
   next: NextFn,
+  options: FsApiOptions = {},
 ): void {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (!url.pathname.startsWith("/api/fs/")) {
     next();
     return;
   }
-  handleFsRequest(req, res, url).catch((err: unknown) => {
+  handleFsRequest(req, res, url, options).catch((err: unknown) => {
     const status = err instanceof HttpError ? err.status : 500;
     const message = err instanceof Error ? err.message : "Unknown error";
     if (!res.headersSent) sendJson(res, status, { error: message });
@@ -436,6 +452,7 @@ async function handleFsRequest(
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
+  options: FsApiOptions,
 ): Promise<void> {
   const route = url.pathname;
 
@@ -444,6 +461,29 @@ async function handleFsRequest(
     if (req.method !== "GET") throw new HttpError(405, "GET only");
     sendJson(res, 200, { home: os.homedir() });
     return;
+  }
+
+  /* ---- GET/PUT /api/fs/default-folder : the folder remembered in .env ---- */
+  if (route === "/api/fs/default-folder") {
+    if (req.method === "GET") {
+      sendJson(res, 200, { folder: await readEnvFolder(options.envFile) });
+      return;
+    }
+    if (req.method === "PUT") {
+      const body = await readJsonBody<{ folder?: unknown }>(req);
+      const folder = typeof body.folder === "string" ? body.folder.trim() : "";
+      if (!folder || folder.length > 1000) throw new HttpError(400, "Missing folder path");
+      const abs = path.resolve(folder);
+      const st = await fs.stat(abs).catch(() => null);
+      if (!st || !st.isDirectory()) throw new HttpError(400, `Not a folder: ${folder}`);
+      /* only touch the file when the value actually changes */
+      if ((await readEnvFolder(options.envFile)) !== abs) {
+        await writeEnvFolder(abs, options.envFile);
+      }
+      sendJson(res, 200, { ok: true, folder: abs });
+      return;
+    }
+    throw new HttpError(405, "GET or PUT only");
   }
 
   /* ---- GET /api/fs/browse?path= : list subfolders for the picker ---- */
@@ -479,16 +519,17 @@ async function handleFsRequest(
     const walk = await walkFolder(root);
     /* a successful scan is what unlocks read/write for this folder */
     await registerScan(root, walk);
-    const manifestRel = Object.keys(walk.files).find(
-      (rel) => rel === MANIFEST_FILE_NAME || rel.endsWith("/" + MANIFEST_FILE_NAME),
-    );
+    /* Only the folder's own manifest steers it. One found in a snippet
+       subfolder belongs to that snippet (it applies when opening that
+       folder directly), not to the whole collection. */
+    const manifestText = walk.files[MANIFEST_FILE_NAME] ?? null;
     sendJson(res, 200, {
       root,
       label: path.basename(root),
       files: walk.files,
       assets: walk.assets,
       skipped: walk.skipped,
-      manifestText: manifestRel ? walk.files[manifestRel] : null,
+      manifestText,
     });
     return;
   }
@@ -510,6 +551,73 @@ async function handleFsRequest(
     if (await isDirectory(abs)) throw new HttpError(400, `Not a file: ${body.path}`);
     await fs.writeFile(abs, body.content, "utf8");
     sendJson(res, 200, { ok: true, path: abs, bytes: Buffer.byteLength(body.content) });
+    return;
+  }
+
+  /* ---- POST /api/fs/resolve { root, resolve, requests } : vendor missing imports ---- */
+  if (route === "/api/fs/resolve") {
+    if (req.method !== "POST") throw new HttpError(405, "POST only");
+    const body = await readJsonBody<{
+      root?: string;
+      resolve?: unknown;
+      requests?: unknown;
+    }>(req);
+    if (!body.root) throw new HttpError(400, "Missing root");
+    const rootPath = body.root;
+    await assertScannedRoot(rootPath);
+    if (!Array.isArray(body.requests) || body.requests.length === 0) {
+      throw new HttpError(400, "Missing requests");
+    }
+    if (body.requests.length > 400) throw new HttpError(400, "Too many requests");
+
+    const requests: ResolveRequest[] = [];
+    for (const raw of body.requests) {
+      if (!raw || typeof raw !== "object") continue;
+      const specifier = String((raw as { specifier?: unknown }).specifier ?? "");
+      const fromDir = String((raw as { fromDir?: unknown }).fromDir ?? "");
+      if (!specifier || specifier.length > 300 || fromDir.length > 300) continue;
+      requests.push({ specifier, fromDir });
+    }
+    if (requests.length === 0) throw new HttpError(400, "No resolvable requests");
+
+    const resolveMap: Record<string, string> = {};
+    if (body.resolve && typeof body.resolve === "object" && !Array.isArray(body.resolve)) {
+      for (const [key, value] of Object.entries(body.resolve)) {
+        if (typeof value === "string" && key.length > 0 && key.length <= 300 && value.length <= 500) {
+          resolveMap[key] = value;
+        }
+      }
+    }
+
+    const outcome = await resolveImports({
+      requests,
+      resolve: resolveMap,
+      exists: async (rel) => {
+        const st = await fs.stat(resolveWithin(rootPath, rel)).catch(() => null);
+        return st?.isFile() ?? false;
+      },
+    });
+
+    const written: string[] = [];
+    const skipped = [...outcome.skipped];
+    for (const [rel, content] of outcome.files) {
+      if (!isEditableFile(rel)) {
+        skipped.push({ path: rel, reason: "unsupported file type" });
+        continue;
+      }
+      const abs = resolveWithin(rootPath, rel);
+      await assertRealWithin(rootPath, abs, { mustExist: false });
+      await fs.mkdir(path.dirname(abs), { recursive: true });
+      await fs.writeFile(abs, content, "utf8");
+      written.push(rel);
+    }
+
+    sendJson(res, 200, {
+      written,
+      skipped,
+      unresolved: outcome.unresolved,
+      notes: outcome.notes,
+    });
     return;
   }
 

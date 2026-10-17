@@ -10,6 +10,12 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5199,
     strictPort: false,
+    watch: {
+      /* The app rewrites `.env` when the user picks a folder; without
+         this Vite would restart itself and reload the page for it.
+         Restart by hand to pick up .env edits made in an editor. */
+      ignored: ["**/.env"],
+    },
   },
   preview: {
     host: "127.0.0.1",

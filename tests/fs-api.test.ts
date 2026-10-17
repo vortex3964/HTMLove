@@ -107,6 +107,9 @@ describe("fs API over HTTP", () => {
   let tmp: string;
   let server: http.Server;
   let base: string;
+  let envDir: string;
+  let envFile: string;
+  const savedEnvFolder = process.env.HTMLOVE_FOLDER;
 
   const put = (body: { root: string; path: string; content: string }) =>
     fetch(`${base}/api/fs/file`, {
@@ -124,16 +127,25 @@ describe("fs API over HTTP", () => {
 
   beforeAll(async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "htmlove-api-"));
+    envDir = await fs.mkdtemp(path.join(os.tmpdir(), "htmlove-api-env-"));
+    envFile = path.join(envDir, ".env");
+    /* the developer's own .env value must not leak into these tests */
+    delete process.env.HTMLOVE_FOLDER;
     await fs.mkdir(path.join(tmp, "sub"), { recursive: true });
     await fs.writeFile(path.join(tmp, "sub/thing.txt"), "hello");
     await fs.writeFile(path.join(tmp, "sub/old.txt"), "old");
     await fs.writeFile(path.join(tmp, "pic.png"), Buffer.alloc(16, 1));
 
     server = http.createServer((req, res) => {
-      fsApiMiddleware(req, res, () => {
-        res.statusCode = 404;
-        res.end("fell through");
-      });
+      fsApiMiddleware(
+        req,
+        res,
+        () => {
+          res.statusCode = 404;
+          res.end("fell through");
+        },
+        { envFile },
+      );
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const { port } = server.address() as AddressInfo;
@@ -145,6 +157,9 @@ describe("fs API over HTTP", () => {
   afterAll(async () => {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(tmp, { recursive: true, force: true });
+    await fs.rm(envDir, { recursive: true, force: true });
+    if (savedEnvFolder === undefined) delete process.env.HTMLOVE_FOLDER;
+    else process.env.HTMLOVE_FOLDER = savedEnvFolder;
   });
 
   const json = async (res: Response) => {
@@ -177,6 +192,21 @@ describe("fs API over HTTP", () => {
     const data = await json(res);
     expect(data.files["sub/thing.txt"]).toBe("hello");
     expect(Object.keys(data.assets)).toEqual(["pic.png"]);
+  });
+
+  it("steers a folder by its own manifest only, never a nested one", async () => {
+    await fs.writeFile(path.join(tmp, "playground.deps.json"), '{"packages":{"x":"1"}}');
+    await fs.writeFile(path.join(tmp, "sub/playground.deps.json"), '{"packages":{"y":"2"}}');
+
+    const own = await json(await scan(tmp));
+    expect(own.manifestText).toBe('{"packages":{"x":"1"}}');
+
+    /* without a root manifest a nested one is ignored, not misapplied */
+    await fs.rm(path.join(tmp, "playground.deps.json"));
+    const nestedOnly = await json(await scan(tmp));
+    expect(nestedOnly.manifestText).toBeNull();
+
+    await fs.rm(path.join(tmp, "sub/playground.deps.json"));
   });
 
   it("writes a scanned file and reads it back", async () => {
@@ -268,6 +298,50 @@ describe("fs API over HTTP", () => {
     } finally {
       await fs.rm(other, { recursive: true, force: true });
     }
+  });
+
+  it("remembers the default folder in its own .env file", async () => {
+    const initial = await json(await fetch(`${base}/api/fs/default-folder`));
+    expect(initial.folder).toBeNull();
+
+    const res = await fetch(`${base}/api/fs/default-folder`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ folder: tmp }),
+    });
+    expect(res.status).toBe(200);
+    expect(await fs.readFile(envFile, "utf8")).toBe(`HTMLOVE_FOLDER=${tmp}\n`);
+    expect((await json(await fetch(`${base}/api/fs/default-folder`))).folder).toBe(tmp);
+  });
+
+  it("keeps the rest of the .env and refuses folders that are not there", async () => {
+    await fs.writeFile(envFile, "# my notes\nOTHER=1\nHTMLOVE_FOLDER=/gone\n");
+    const res = await fetch(`${base}/api/fs/default-folder`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ folder: tmp }),
+    });
+    expect(res.status).toBe(200);
+    const text = await fs.readFile(envFile, "utf8");
+    expect(text).toContain("# my notes");
+    expect(text).toContain("OTHER=1");
+
+    const missing = await fetch(`${base}/api/fs/default-folder`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ folder: path.join(tmp, "nope") }),
+    });
+    expect(missing.status).toBe(400);
+
+    const empty = await fetch(`${base}/api/fs/default-folder`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(empty.status).toBe(400);
+
+    const wrong = await fetch(`${base}/api/fs/default-folder`, { method: "DELETE" });
+    expect(wrong.status).toBe(405);
   });
 
   it("falls through for non-api requests and 404s unknown api routes", async () => {

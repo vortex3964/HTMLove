@@ -70,3 +70,14 @@ export interface Session {
   manifestText: string | null;
   catalog: Component[];
 }
+
+/** Result of the doctor's Resolve action (vendoring missing imports). */
+export interface ResolveReport {
+  /** Rel paths of the files that were fetched and written. */
+  written: string[];
+  /** Files the resolver deliberately left alone. */
+  skipped: Array<{ path: string; reason: string }>;
+  /** Imports that no rule or preset could satisfy. */
+  unresolved: Array<{ specifier: string; reason: string }>;
+  notes: string[];
+}

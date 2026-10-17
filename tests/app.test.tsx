@@ -38,11 +38,21 @@ function jsonResponse(data: unknown, status = 200): Response {
 let container: HTMLDivElement;
 let root: Root;
 let scanned: string[];
+let envFolder: string | null;
+let remembered: string[];
 
 function mockFetch() {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === "/api/fs/home") return jsonResponse({ home: "/fake/home" });
+    if (url === "/api/fs/default-folder") {
+      if (init?.method === "PUT") {
+        const body = JSON.parse(String(init.body ?? "{}")) as { folder: string };
+        remembered.push(body.folder);
+        return jsonResponse({ ok: true, folder: body.folder });
+      }
+      return jsonResponse({ folder: envFolder });
+    }
     if (url.startsWith("/api/fs/browse")) {
       const path = new URL(url, "http://localhost").searchParams.get("path") ?? "";
       if (path === "/fake/home") {
@@ -118,6 +128,8 @@ async function loadFixtureFolder() {
 beforeEach(async () => {
   localStorage.clear();
   scanned = [];
+  envFolder = null;
+  remembered = [];
   vi.stubGlobal("fetch", mockFetch());
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -222,5 +234,30 @@ describe("the htmlove app", () => {
     expect(container.textContent).toContain("Couldn't reopen your last folder");
     expect(document.querySelector(".modal")).toBeTruthy();
     expect(localStorage.getItem("htmlove:last-folder")).toBeNull();
+  });
+
+  it("remembers the picked folder on the server (.env)", async () => {
+    await loadFixtureFolder();
+    expect(remembered).toEqual(["/fake/home/components"]);
+  });
+
+  it("opens the folder remembered in .env when the browser has none", async () => {
+    await act(async () => root.unmount());
+    envFolder = "/fake/home/components";
+    await mountApp();
+    expect(scanned).toEqual(["/fake/home/components"]);
+    expect(container.querySelector(".sidebar")).toBeTruthy();
+    /* the app confirms the value; the server skips writing when unchanged */
+    expect(remembered).toEqual(["/fake/home/components"]);
+    expect(localStorage.getItem("htmlove:last-folder")).toContain("/fake/home/components");
+  });
+
+  it("falls back to the picker when the .env folder is gone", async () => {
+    await act(async () => root.unmount());
+    envFolder = "/moved/away";
+    await mountApp();
+    expect(scanned).toEqual(["/moved/away"]);
+    expect(container.textContent).toContain("Couldn't reopen your last folder");
+    expect(document.querySelector(".modal")).toBeTruthy();
   });
 });

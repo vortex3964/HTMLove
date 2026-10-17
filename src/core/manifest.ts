@@ -6,12 +6,16 @@
  *     "packages":  { "lucide-react": "0.469.0" },          // version pins
  *     "urls":      { "@/registry/x": "https://…/x.js" },   // full URL for any specifier
  *     "stubs":     ["@untitledui/icons"],                  // always stub these
+ *     "resolve":   { "./card": "registry:https://ui.shadcn.com/r/styles/new-york/*.json" },
  *     "tailwind":  false,                                  // force tailwind off everywhere
  *     "tokens":    { "--primarylw": "#6366f1" },           // design tokens for every preview
  *     "components": {                                      // per component (id or name)
  *       "glass-folder/glass.tsx": { "tailwind": true, "tokens": { "--primarylw": "tomato" } }
  *     }
  *   }
+ *
+ * `resolve` maps missing (stubbed) imports to fetchable sources — see
+ * src/core/resolve.ts for the syntax and the built-in presets.
  */
 import type { Component } from "./types";
 
@@ -24,6 +28,8 @@ export interface DepsManifest {
   packages?: Record<string, string>;
   urls?: Record<string, string>;
   stubs?: string[];
+  /** Missing-import vendoring rules: specifier or `prefix*` -> source. */
+  resolve?: Record<string, string>;
   tailwind?: boolean;
   tokens?: Record<string, string>;
   components?: Record<string, ComponentManifestEntry>;
@@ -74,6 +80,8 @@ export function parseManifest(text: string | null | undefined): ManifestParseRes
   if (urls) manifest.urls = urls;
   const stubs = stringArray(raw.stubs);
   if (stubs) manifest.stubs = stubs;
+  const resolveRules = stringRecord(raw.resolve);
+  if (resolveRules) manifest.resolve = resolveRules;
   if (typeof raw.tailwind === "boolean") manifest.tailwind = raw.tailwind;
   const tokens = stringRecord(raw.tokens);
   if (tokens) manifest.tokens = tokens;

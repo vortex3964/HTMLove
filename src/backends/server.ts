@@ -2,7 +2,7 @@
  * Backend: the local file API served by the htmlove dev/preview server.
  * Works in every browser that can reach the app itself.
  */
-import type { RawSnapshot } from "../core/types";
+import type { RawSnapshot, ResolveReport } from "../core/types";
 import type { BrowseResult, FileBackend } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -33,6 +33,19 @@ export const serverBackend: FileBackend & {
     return request<BrowseResult>(`/api/fs/browse?path=${encodeURIComponent(path)}`);
   },
 
+  async defaultFolder() {
+    const data = await request<{ folder: string | null }>("/api/fs/default-folder");
+    return data.folder ?? null;
+  },
+
+  async rememberFolder(root: string) {
+    await request("/api/fs/default-folder", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ folder: root }),
+    });
+  },
+
   async scan(root: string) {
     return request<RawSnapshot>("/api/fs/scan", {
       method: "POST",
@@ -46,6 +59,14 @@ export const serverBackend: FileBackend & {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ root, path: relPath, content }),
+    });
+  },
+
+  async resolve(root, resolveMap, requests) {
+    return request<ResolveReport>("/api/fs/resolve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ root, resolve: resolveMap, requests }),
     });
   },
 

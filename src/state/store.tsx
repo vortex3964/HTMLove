@@ -15,7 +15,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { buildCatalog } from "../core/catalog";
+import { buildCatalog, dirOf } from "../core/catalog";
 import { carryEdits, componentPaths, dirtyPaths } from "../core/edits";
 import { scheduleDraftSave, sweepDrafts } from "../core/drafts";
 import { planImports } from "../core/deps";
@@ -47,7 +47,7 @@ import {
   setLastFolder,
   type Prefs,
 } from "../core/persist";
-import type { Component, Session } from "../core/types";
+import type { Component, ResolveReport, Session } from "../core/types";
 import { serverBackend } from "../backends/server";
 import type { FileBackend } from "../backends/types";
 
@@ -72,9 +72,10 @@ export interface StoreShape {
   /**
    * Scan a folder and make it the session. `auto: true` is the
    * launch-time restore: failures turn into a friendly notice instead
-   * of the raw error banner.
+   * of the raw error banner. `keepView: true` rescans without kicking
+   * the user back to the board (used after resolving imports).
    */
-  loadFolder(root: string, options?: { auto?: boolean }): Promise<void>;
+  loadFolder(root: string, options?: { auto?: boolean; keepView?: boolean }): Promise<void>;
   rescan(): Promise<void>;
 
   view: ViewState;
@@ -133,6 +134,16 @@ export interface StoreShape {
    * Returns the number of files touched.
    */
   applyAssetFix(componentId: string, dead: string[]): number;
+
+  /** True while missing imports are being fetched and written. */
+  resolving: boolean;
+  /**
+   * Fetch the files behind a component's stubbed imports (manifest
+   * `resolve` rules + built-in presets) and rescan when anything landed.
+   */
+  resolveComponent(componentId: string): Promise<ResolveReport | null>;
+  /** The same, for every stubbed import in the folder at once. */
+  resolveAll(): Promise<ResolveReport | null>;
 }
 
 const StoreContext = createContext<StoreShape | null>(null);
@@ -143,6 +154,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [resolving, setResolving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -191,7 +203,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadFolder = useCallback(
-    async (root: string, options?: { auto?: boolean }) => {
+    async (root: string, options?: { auto?: boolean; keepView?: boolean }) => {
+      const previousRoot = sessionRef.current?.root ?? null;
       setBusy(true);
       setError(null);
       try {
@@ -212,9 +225,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           manifestText: snapshot.manifestText ?? null,
           catalog: components,
         });
-        setTokensState({});
+        /* a rescan of the same folder keeps the token tweaks as well */
+        if (previousRoot !== snapshot.root) setTokensState({});
         addRecent(snapshot.root, snapshot.label);
         setLastFolder(snapshot.root, snapshot.label);
+        /* remember it server-side too (.env) — best effort, never blocks */
+        void Promise.resolve(backend.rememberFolder?.(snapshot.root)).catch(() => {});
         /* restore what this folder had mounted, minus anything gone */
         const valid = new Set(components.map((c) => c.id));
         commitBoard(normalizeBoard(getBoard(snapshot.root), valid));
@@ -223,7 +239,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setPropsById(storedProps);
         setEditingId(null);
         setRestoreNotice(null);
-        setView({ mode: "board" });
+        if (!options?.keepView) setView({ mode: "board" });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         removeRecent(root);
@@ -249,16 +265,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (current) await loadFolder(current.root);
   }, [loadFolder]);
 
-  /* launch: try the folder from last time before showing a blank slate */
+  /* launch: the folder from .env first, the browser-stored one as fallback */
   const didAutoRestore = useRef(false);
   useEffect(() => {
     if (didAutoRestore.current) return;
     didAutoRestore.current = true;
     /* abandoned folders should not pile up in localStorage forever */
     sweepDrafts();
-    const last = getLastFolder();
-    if (last) void loadFolder(last.root, { auto: true });
-  }, [loadFolder]);
+    void (async () => {
+      let fromEnv: string | null = null;
+      try {
+        fromEnv = (await backend.defaultFolder?.()) ?? null;
+      } catch {
+        /* no server (or an older one) — the browser memory still works */
+      }
+      const root = fromEnv ?? getLastFolder()?.root ?? null;
+      if (root) await loadFolder(root, { auto: true });
+    })();
+  }, [backend, loadFolder]);
 
   const openPicker = useCallback(() => setPickerOpen(true), []);
   const closePicker = useCallback(() => setPickerOpen(false), []);
@@ -506,6 +530,71 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [applySession],
   );
 
+  /* ------------------------------------------------------------ */
+  /* missing-import vendoring (the doctor's Resolve action)        */
+  /* ------------------------------------------------------------ */
+
+  const runResolve = useCallback(
+    async (
+      requests: Array<{ specifier: string; fromDir: string }>,
+    ): Promise<ResolveReport | null> => {
+      const current = sessionRef.current;
+      if (!current || requests.length === 0) return null;
+      if (!backend.resolve) {
+        setError("This backend cannot fetch imports — the local file server is required.");
+        return null;
+      }
+      setResolving(true);
+      setError(null);
+      try {
+        const report = await backend.resolve(current.root, manifest.resolve ?? {}, requests);
+        /* anything landed on disk — rescan so plans and previews see it */
+        if (report.written.length > 0) {
+          await loadFolder(current.root, { keepView: true });
+        }
+        return report;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        return null;
+      } finally {
+        setResolving(false);
+      }
+    },
+    [backend, manifest, loadFolder],
+  );
+
+  const resolveComponent = useCallback(
+    async (componentId: string): Promise<ResolveReport | null> => {
+      const current = sessionRef.current;
+      const component = current?.catalog.find((c) => c.id === componentId);
+      if (!current || !component) return null;
+      const fromDir = dirOf(component.tsxPath ?? component.id);
+      const requests = component.imports
+        .filter((entry) => entry.status === "stub")
+        .map((entry) => ({ specifier: entry.specifier, fromDir }));
+      return runResolve(requests);
+    },
+    [runResolve],
+  );
+
+  const resolveAll = useCallback(async (): Promise<ResolveReport | null> => {
+    const current = sessionRef.current;
+    if (!current) return null;
+    const requests: Array<{ specifier: string; fromDir: string }> = [];
+    const seen = new Set<string>();
+    for (const component of current.catalog) {
+      const fromDir = dirOf(component.tsxPath ?? component.id);
+      for (const entry of component.imports) {
+        if (entry.status !== "stub") continue;
+        const key = `${fromDir}\u0000${entry.specifier}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        requests.push({ specifier: entry.specifier, fromDir });
+      }
+    }
+    return runResolve(requests);
+  }, [runResolve]);
+
   const value = useMemo<StoreShape>(
     () => ({
       backend,
@@ -549,6 +638,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       tokens,
       setToken,
       applyAssetFix,
+      resolving,
+      resolveComponent,
+      resolveAll,
     }),
     [
       backend,
@@ -592,6 +684,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       tokens,
       setToken,
       applyAssetFix,
+      resolving,
+      resolveComponent,
+      resolveAll,
     ],
   );
 

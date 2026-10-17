@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  collectImportedFiles,
   dirnameOf,
   extractImportedNames,
   isNpmSpecifier,
@@ -133,12 +134,47 @@ describe("resolveLocalCandidate", () => {
     );
   });
 
+  it("roots `@/` at the snippet folder first, then the scan root", () => {
+    const both = new Set(["carousel/utils/cx.ts", "utils/cx.ts"]);
+    expect(resolveLocalCandidate("@/utils/cx", "carousel/car.tsx", both)).toBe(
+      "carousel/utils/cx.ts",
+    );
+
+    /* nested files still belong to their top-level snippet folder */
+    const nested = new Set(["date-picker/utils/cx.ts"]);
+    expect(
+      resolveLocalCandidate("@/utils/cx", "date-picker/components/base/buttons/button.tsx", nested),
+    ).toBe("date-picker/utils/cx.ts");
+
+    /* a file at the scan root keeps the root as its alias base */
+    const rootFile = new Set(["utils/cx.ts"]);
+    expect(resolveLocalCandidate("@/utils/cx", "car.tsx", rootFile)).toBe("utils/cx.ts");
+  });
+
   it("stays inside the folder", () => {
     expect(resolveLocalCandidate("../../etc/passwd", "a/b.tsx", known)).toBeNull();
     expect(resolveLocalCandidate("../outside", "", known)).toBeNull();
+    expect(resolveLocalCandidate("@/../outside", "carousel/car.tsx", known)).toBeNull();
   });
 
   it("returns null for anything not in the folder", () => {
     expect(resolveLocalCandidate("./missing", "carousel/car.tsx", known)).toBeNull();
+    expect(resolveLocalCandidate("@/missing", "carousel/car.tsx", known)).toBeNull();
+  });
+});
+
+describe("collectImportedFiles", () => {
+  it("marks every file another file imports", () => {
+    const files: Record<string, string> = {
+      "date-picker/date.tsx": 'import { D } from "./date-picker";',
+      "date-picker/date-picker.tsx": 'import { cx } from "@/utils/cx";',
+      "date-picker/utils/cx.ts": "export const cx = 1;",
+      "carousel/car.tsx": "export default 1;",
+    };
+    const imported = collectImportedFiles(files);
+    expect([...imported].sort()).toEqual([
+      "date-picker/date-picker.tsx",
+      "date-picker/utils/cx.ts",
+    ]);
   });
 });

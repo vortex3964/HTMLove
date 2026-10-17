@@ -59,6 +59,17 @@ describe("planImports", () => {
     });
   });
 
+  it("lists each specifier once even when imported twice", () => {
+    const plan = planImports(
+      'import { Tree } from "@/file-tree";\nimport type { Item } from "@/file-tree";',
+      "x.tsx",
+      new Set(["x.tsx"]),
+      new Set(),
+    );
+    expect(plan.filter((p) => p.specifier === "@/file-tree")).toHaveLength(1);
+    expect(plan[0].names).toEqual(["Tree", "Item"]);
+  });
+
   it("notes version pins from the manifest", () => {
     const plan = planImports(source, "carousel/car.tsx", files, assets, {
       packages: { "lucide-react": "0.469.0" },

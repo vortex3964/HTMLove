@@ -98,5 +98,18 @@ export function planImports(
     });
   }
 
-  return entries;
+  /* One entry per specifier, even when a file imports it twice (value +
+     type imports) — the doctor should not offer to resolve it twice. */
+  const unique = new Map<string, PlanEntry>();
+  for (const entry of entries) {
+    const prior = unique.get(entry.specifier);
+    if (!prior) {
+      unique.set(entry.specifier, entry);
+      continue;
+    }
+    for (const name of entry.names) {
+      if (!prior.names.includes(name)) prior.names.push(name);
+    }
+  }
+  return [...unique.values()];
 }
