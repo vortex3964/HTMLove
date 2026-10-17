@@ -15,20 +15,26 @@ choose, and everything else happens in your browser.
 
 ## What it does
 
-- **Any folder becomes a gallery.** The picker browses the whole machine (or paste
-  a path). Folders of loose snippets — `hi.html` + `hi.css` pairs, standalone HTML,
-  `.tsx` sources and `.txt` files with CSS and markup pasted together — are
-  catalogued into components and rendered live, side by side, each in its own
-  sandboxed iframe.
+- **Any folder becomes a dashboard.** The picker browses the whole machine (or pastes
+  a path), and htmlove remembers the folder you had open — if it has moved away it
+  says so and falls back to the picker. Components are catalogued into a sidebar;
+  click or drag one onto the board, drag panels to reorder them, pick 2–4 columns,
+  and the layout and props survive reloads (drafts and props are stored per folder).
 - **React components actually run.** `.tsx` sources are bundled in the browser with
   esbuild (wasm). Imports that live in the folder are bundled for real; npm
   packages load from esm.sh pinned to a single React 18; anything that cannot be
   found becomes a visible dashed placeholder instead of a silent crash. Compile and
-  render errors are shown on the card, not swallowed.
-- **Edit with live preview.** Every file of a component opens in an editor
-  (CodeMirror). Typing re-renders the preview shortly after you pause. Drafts are
-  kept in localStorage, **Save** writes back to the original files, **Reset**
-  returns to the last on-disk version.
+  render errors are shown on the panel, not swallowed — with a hint naming the
+  usual suspects (missing props, a missing provider, a library loaded twice).
+- **Props, right where they are needed.** Components that take props get a small
+  JSON editor behind the `{}` button in the panel header; it applies as you type
+  and tells you when the JSON is off.
+- **Edit beside the board.** Every file of a component opens in a drawer on the
+  left (CodeMirror) that pushes the board over, so the edited panel stays visible.
+  Typing re-renders the preview shortly after you pause. Drafts are kept in
+  localStorage, **Save** (or `Ctrl/Cmd+S`) writes back to the original files,
+  **Reset** returns to the last on-disk version. `Esc` closes the drawer, `/`
+  jumps to the sidebar search, and small toasts confirm what was saved.
 - **A dependency doctor.** A folder-wide table of every import and remote asset:
   classify imports, probe CDN reachability, find dead remote images and replace
   them with neutral placeholders (as editable changes), edit the folder's
@@ -73,7 +79,11 @@ Drop this file into the folder you point htmlove at. Everything in it is optiona
 - The file API only serves files under the chosen root, rejects path escapes, and
   skips noise (`node_modules`, `.git`, `dist`, …) with sane size caps.
 - Missing imports, unresolved assets and render errors surface as first-class UI
-  (badges, placeholders, error overlays) instead of blank boxes.
+  (badges, placeholders, error overlays) instead of blank boxes — and the overlay
+  does not stop at the raw message: it names the likely cause.
+- The CodeMirror family shares one `@codemirror/state`/`view`/`language` instance
+  in previews, so editing your own CodeMirror-based components does not trip the
+  "Unrecognized extension value" wall.
 
 ## Project layout
 
@@ -90,8 +100,10 @@ src/core/            pure logic, heavily unit-tested
   tokens.ts          CSS variable detection + injection
   assets.ts          remote-asset extraction, probing, dead-link rewriting
   edits.ts/drafts.ts preview-vs-disk content, dirty logic, localStorage drafts
-src/state/store.tsx  the one React context: session, edits, manifest, view
-src/ui/              shell, gallery, detail playground, picker, doctor
+  board.ts           the dashboard model: mount/order + props JSON helpers
+  persist.ts         localStorage: recents, last folder, board, props, prefs
+src/state/store.tsx  the one React context: session, board, edits, manifest, view
+src/ui/              shell, sidebar, board panels, editor drawer, picker, doctor
 tests/               unit + integration tests (vitest)
 ```
 
