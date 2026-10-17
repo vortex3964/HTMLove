@@ -15,7 +15,9 @@ export const PINNED_VERSIONS: Record<string, string> = {
   "@internationalized/date": "3.6.0",
   "react-aria": "3.36.0",
   "react-aria-components": "1.5.0",
-  codemirror: "6",
+  /* Exact on purpose: npm has a stray `codemirror@6.65.7` (a legacy
+     bundle with only a default export) and `@6` resolves to it. */
+  codemirror: "6.0.2",
   "@codemirror/state": "6",
   "@codemirror/view": "6",
   "@codemirror/language": "6",
@@ -68,8 +70,14 @@ export function esmUrl(specifier: string, versionOverrides?: Record<string, stri
   const pinned = versionOverrides?.[specifier] ?? PINNED_VERSIONS[specifier];
   const versioned = pinned ? `${specifier}@${pinned}` : specifier;
   const shared = SHARED_PEERS[specifier];
-  const externalParam = shared && shared.length > 0 ? `&external=${shared.join(",")}` : "";
-  return `https://esm.sh/${versioned}?deps=react@${PREVIEW_REACT_VERSION}${externalParam}`;
+  /* CodeMirror never touches React: adding the deps param would only
+     isolate its build from the module paths its own bundles reference. */
+  const reactFree = specifier === "codemirror" || specifier.startsWith("@codemirror/");
+  const params: string[] = [];
+  if (!reactFree) params.push(`deps=react@${PREVIEW_REACT_VERSION}`);
+  if (shared && shared.length > 0) params.push(`external=${shared.join(",")}`);
+  const query = params.length > 0 ? `?${params.join("&")}` : "";
+  return `https://esm.sh/${versioned}${query}`;
 }
 
 export interface ImportMap {

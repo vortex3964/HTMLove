@@ -81,6 +81,15 @@ describe("esmUrl", () => {
     expect(esmUrl("some-pkg")).toContain("esm.sh/some-pkg?");
     expect(esmUrl("some-pkg", { "some-pkg": "9.9.9" })).toContain("some-pkg@9.9.9");
   });
+
+  it("keeps CodeMirror exact and free of the react dep param", () => {
+    /* `codemirror@6` resolves to a stray legacy 6.65.7 release on npm,
+       so the pin is exact; and the family never gets `deps=react`. */
+    expect(esmUrl("codemirror")).toContain("codemirror@6.0.2");
+    expect(esmUrl("codemirror")).not.toContain("deps=");
+    expect(esmUrl("@codemirror/state")).toContain("@codemirror/state@6");
+    expect(esmUrl("@codemirror/state")).not.toContain("deps=");
+  });
 });
 
 describe("buildImportMap", () => {
